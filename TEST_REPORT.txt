@@ -1,1 +1,11 @@
-98 local tests passed. Original and flattened mobile-upload entrypoints checked without network. Live hosting and ChatGPT login remain untested.
+SMM Manager 1.3.0
+120 local tests passed (python -m unittest discover -s tests -t . -q).
+Includes empty-catalog discovery, source allowlisting, partial result persistence,
+12-hour cache expiry, cache isolation, budget and stock validation, duplicate
+outfit prevention, persistent stage limits, every-stage usage accounting,
+one-time upgrade preserving owner/coowners/model/usage/pause and user budgets,
+navigation, publication and original/flattened mobile-upload startup.
+Network responses are mocked. Live Bothost deployment, account web-search
+availability, real marketplace access and ChatGPT login remain untested.
+Image generation is unavailable through the current subscription connection;
+images must be supplied separately before approving fashion posts.

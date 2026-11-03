@@ -80,12 +80,14 @@ def verify_product(product, now=None):
                     types = [types] if isinstance(types, str) else types
                     if "Product" not in types:
                         continue
+                    if isinstance(obj.get("url"), str) and canonical(obj["url"]) != canonical(p["url"]):
+                        continue  # A recommendation widget is not this product's offer.
                     offer = obj.get("offers", {})
                     offers = offer if isinstance(offer, list) else [offer]
                     for o in offers:
                         if str(o.get("priceCurrency", "")).upper() != "RUB":
                             continue
-                        if o.get("availability") and "InStock" not in o["availability"]:
+                        if str(o.get("availability", "")).rsplit("/", 1)[-1] != "InStock":
                             continue
                         amount = o.get("price")
                         if amount is None:
@@ -108,7 +110,10 @@ def verify_product(product, now=None):
 def news_options(result, articles, previous, config, now):
     known = {x["id"]: x for x in articles}
     options, used = [], set()
-    for raw in result.get("options", [])[:2]:
+    raw_options = result.get("options", [])
+    if not isinstance(raw_options, list):
+        return []
+    for raw in raw_options[:2]:
         if not isinstance(raw, dict):
             continue
         ids = raw.get("article_ids", [])
@@ -141,13 +146,16 @@ def fashion_options(result, config, limit, now, allowed_urls=None, catalog=None)
     catalogue = {str(i+1): p for i, p in enumerate(catalog or [])}
     allow = {canonical(x) for x in (allowed_urls or []) if x.startswith(("http://", "https://"))}
     cache = {}
-    for raw in result.get("options", [])[:2]:
+    raw_options = result.get("options", [])
+    if not isinstance(raw_options, list):
+        return []
+    for raw in raw_options[:2]:
         try:
             if catalogue:
                 products = [dict(catalogue[str(i)]) for i in raw["item_ids"]]
                 # Local catalogue has explicit human-checked timestamps.
                 for p in products:
-                    p["verified"] = p.get("checked_at", 0) >= now-86400
+                    p["verified"] = (bool(p.get("verified")) and p.get("checked_at", 0) >= now-86400) if p.get("automatic") else p.get("checked_at", 0) >= now-86400
             else:
                 products = [validate_product(x) for x in raw["items"]]
                 if any(p["url"] not in allow for p in products):

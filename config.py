@@ -28,15 +28,19 @@ def atomic_json(path: Path, value: dict) -> None:
 
 
 DEFAULT_LIMITS = {
-    "daily_tokens": 50000,
-    "rolling_tokens": 30000,
-    "channel_daily_tokens": 25000,
-    "daily_requests": 20,
-    "hourly_requests": 8,
+    "daily_tokens": 300000,
+    "rolling_tokens": 180000,
+    "channel_daily_tokens": 200000,
+    "daily_requests": 100,
+    "hourly_requests": 40,
     "request_reserve": 12000,
     "request_output_bytes": 6500,
     "request_seconds": 90,
     "web_calls": 2,
+    "fashion_web_calls": 4,
+    "fashion_output_bytes": 24000,
+    "fashion_seconds": 150,
+    "fashion_steps": 10,
     "lead_minutes": 40,
     "max_attempts_per_slot": 2,
 }
@@ -56,7 +60,7 @@ DEFAULT_CHANNELS = [
          sources=["https://blog.playstation.com/feed/", "https://news.xbox.com/en-us/feed/"]),
     dict(name="Собрано | Доступный стиль", mode="fashion", topic="Полные гармоничные зимние образы с Wildberries и Ozon. Куртка/пуховик, свитер/худи, брюки, зимняя обувь, шапка, сумка; аксессуары по необходимости. Мужские и женские образы. Две взрослые модели разного телосложения в одном и том же комплекте, без различимых лиц.",
          times=["15:00", "21:00"], max_age_hours=24, sources=[],
-         budgets={"15:00": 10000, "21:00": 20000}),
+         budgets={"15:00": 10000, "21:00": 20000}, web_search=True),
     dict(name="Кино на вечер", mode="cinema", topic="Два интересных фильма или сериала на выбор. Название, год, коротко кому подойдёт, без спойлеров. Изучить настоящие отзывы; не выдавать рекламный анонс за отзыв, не сочинять рейтинг и цитаты.",
          times=["21:00"], max_age_hours=336,
          sources=["https://thefilmstage.com/feed/"]),

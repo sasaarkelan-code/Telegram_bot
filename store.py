@@ -69,6 +69,23 @@ class Store:
                     cfg = channel_defaults()
                     cfg.update({k: v for k, v in item.items() if k != "name"})
                     c.execute("INSERT INTO channels(name,config) VALUES(?,?)", (item["name"], json.dumps(cfg, ensure_ascii=False)))
+            # Apply the requested limits to an existing installation once. Later
+            # user edits (including disabling discovery) must survive restarts.
+            if self.get("fashion_upgrade", 0, c) < 1:
+                limits = self.get("limits", {}, c)
+                for key, default in DEFAULT_LIMITS.items():
+                    if key in ("daily_tokens", "rolling_tokens", "channel_daily_tokens", "daily_requests", "hourly_requests"):
+                        limits[key] = max(limits.get(key, 0), default)
+                    else:
+                        limits.setdefault(key, default)
+                self.put("limits", limits, c)
+                for row in c.execute("SELECT id,config FROM channels").fetchall():
+                    cfg = json.loads(row["config"])
+                    if cfg.get("mode") == "fashion":
+                        cfg["web_search"] = True
+                        c.execute("UPDATE channels SET config=? WHERE id=?", (json.dumps(cfg, ensure_ascii=False), row["id"]))
+                self.put("fashion_upgrade", 1, c)
+                self.notice("fashion-upgrade:1", "🔎 Автопоиск WB/Ozon включён для каналов одежды. Найденные товары сохраняются на 12 часов; ручной каталог необязателен. Лимиты ИИ увеличены: проверь «Лимиты». Модель и счётчики сохранены. Поиск зависит от доступа модели; генерация моделей в одежде через подписку недоступна.", c)
 
     @contextlib.contextmanager
     def tx(self):

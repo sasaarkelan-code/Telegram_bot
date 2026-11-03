@@ -81,7 +81,7 @@ class AI:
         abort_reason = []
 
         def watchdog():
-            deadline = time.monotonic()+limits["request_seconds"]
+            deadline = time.monotonic()+(limits.get("fashion_seconds", 150) if web else limits["request_seconds"])
             while not finished.wait(.4):
                 reason = ""
                 if self.store.get("paused", True):
@@ -112,11 +112,11 @@ class AI:
                     typ = event.get("type", "")
                     if typ == "response.output_text.delta":
                         text += event.get("delta", "")
-                        if len(text.encode()) > limits["request_output_bytes"]:
+                        if len(text.encode()) > (limits.get("fashion_output_bytes", 24000) if web else limits["request_output_bytes"]):
                             raise AIError("Превышен размер ответа; поток закрыт.")
                     if typ == "response.output_item.added" and event.get("item", {}).get("type") == "web_search_call":
                         calls.add(event["item"].get("id", event.get("output_index")))
-                        if len(calls) > limits["web_calls"]:
+                        if len(calls) > (limits.get("fashion_web_calls", 4) if web else limits["web_calls"]):
                             raise AIError("ИИ попытался выполнить лишний поиск; поток закрыт.")
                     if typ in ("response.failed", "response.incomplete", "error"):
                         body = event.get("response", {})
@@ -132,6 +132,11 @@ class AI:
                         break
             if not terminal:
                 raise AIError("Поток оборвался без подтверждения завершения.")
+            if len(text.encode()) > (limits.get("fashion_output_bytes", 24000) if web else limits["request_output_bytes"]):
+                raise AIError("Превышен размер ответа; обработка остановлена.")
+            final_calls = {x.get('id', i) for i, x in enumerate(output) if x.get('type') == 'web_search_call'}
+            if len(final_calls) > (limits.get('fashion_web_calls', 4) if web else limits['web_calls']):
+                raise AIError("ИИ выполнил лишний поиск; обработка остановлена.")
             clean = text.strip()
             if clean.startswith("~~~") or clean.startswith(chr(96)*3):
                 clean = "\n".join(clean.splitlines()[1:-1])

@@ -25,11 +25,14 @@ FIELDS = {
     "budgets": "Бюджеты образов",
 }
 LIMIT_FIELDS = {
-    "daily_tokens": ("Токенов за день", 12000, 200000),
-    "rolling_tokens": ("Токенов за 5 часов", 12000, 100000),
-    "channel_daily_tokens": ("На канал за день", 12000, 100000),
-    "daily_requests": ("Запросов за день", 1, 40),
-    "hourly_requests": ("Запросов за час", 1, 12),
+    "daily_tokens": ("Токенов за день", 12000, 2000000),
+    "rolling_tokens": ("Токенов за 5 часов", 12000, 1000000),
+    "channel_daily_tokens": ("На канал за день", 12000, 1000000),
+    "daily_requests": ("Запросов за день", 1, 500),
+    "hourly_requests": ("Запросов за час", 1, 100),
+    "fashion_steps": ("Этапов на подборку одежды", 1, 16),
+    "fashion_web_calls": ("Поисков за один запрос одежды", 1, 8),
+    "fashion_seconds": ("Секунд на поисковый запрос", 30, 240),
     "lead_minutes": ("Минут до публикации", 30, 40),
 }
 
@@ -103,14 +106,21 @@ class UI:
         rows = [[(label, f"field:{cid}:{key}")] for key, label in FIELDS.items()]
         rows += [[(f'Картинка обязательна: {"да" if cfg["require_photo"] else "нет"}', f"photo_required:{cid}")]]
         if cfg["mode"] == "fashion":
-            rows += [[(f'Веб-поиск WB/Ozon: {"включён" if cfg["web_search"] else "выключен"}', f"web:{cid}")],
-                     [("📦 Как загрузить каталог", "catalog_help")]]
+            rows += [[(f'Автопоиск WB/Ozon: {"включён" if cfg["web_search"] else "выключен"}', f"web:{cid}")],
+                     [("🔎 Как работает автопоиск", "catalog_help")]]
+        discovery = ''
+        if cfg['mode'] == 'fashion':
+            from .fashion import Fashion
+            saved = self.store.get('fashion_cache:'+str(cid), {})
+            count = sum(p.get('found_at', 0) >= time.time()-43200 for p in saved.get('items', [])) if saved.get('scope') == Fashion.scope(cfg) else 0
+            discovery = f'\nСвежих товаров в сохранённых находках: {count}. Поиск начинается в окне подготовки.\n'
         self.send(f'<b>🎛 {html.escape(ch["name"])}</b>\n\n{topic}\n\n'
                   f'Время: {", ".join(cfg["times"])}\n'
                   f'Свежесть: до {cfg["max_age_hours"]} ч.\n'
                   f'Источников: {len(cfg["sources"])}\n'
                   f'Ключевые: {html.escape(", ".join(cfg["include"])) or "вся тематика"}\n'
                   f'Исключить: {html.escape(", ".join(cfg["exclude"])) or "не задано"}\n\n'
+                  + discovery +
                   "Изменение фильтров отменяет одобрения ещё не вышедших постов этого канала.", rows)
 
     def limits(self, edit=False):
@@ -122,6 +132,8 @@ class UI:
                   f'Запросы за день: {u["requests"]} / {limits["daily_requests"]}\n'
                   f'Запросы за час: {u["hourly"]} / {limits["hourly_requests"]}\n'
                   f'Неопределённых/незавершённых расходов: {u["uncertain"]}\n\n'
+                  f'Одежда: до {limits["fashion_steps"]} этапов на выход, до {limits["fashion_web_calls"]} поисков за запрос, {limits["fashion_seconds"]} сек.\n'
+                  'Товары сохраняются на 12 часов; перед сборкой проверяются публичные цены.\n\n'
                   "Учитываются input + output из usage. Если usage не пришёл, засчитывается резерв, и бот останавливается.\n"
                   "Это расход только этого бота, не остаток всей подписки. Запрос в работе может потратить больше резерва: "
                   "официальный вход не поддерживает серверный max_output_tokens.\n"
@@ -166,6 +178,8 @@ class UI:
         meta = p["meta"]
         if meta.get("mode") == "fashion" and meta.get("unverified"):
             lines += ["⚠️ Цены или доступность не подтверждены публичной карточкой. Сначала проверь ссылки и нажми «Товары проверены»."]
+        if meta.get("mode") == "fashion" and not p["media"]:
+            lines += [html.escape(meta.get("image_status", "Нужно прикрепить картинку образа."))]
         for ref in meta.get("sources", []):
             lines.append(f'<a href="{html.escape(ref["url"], quote=True)}">{html.escape(ref["title"][:100])}</a>')
         actions = []
@@ -403,6 +417,8 @@ class UI:
                 raise ValueError("Неизвестный режим.")
             ch = self.need_channel(value)
             ch["config"]["mode"] = mode
+            if mode == "fashion":
+                ch["config"]["web_search"] = True
             self.store.update_channel(value, config=ch["config"])
             self.filters(value)
         elif action in ("photo_required", "web"):
@@ -486,11 +502,11 @@ class UI:
                       "\nДля входа или смены модели запусти LOGIN.bat на компьютере с ботом.\n"
                       "Пароль и токены в Telegram присылать не нужно. Платный API автоматически не подключается.")
         elif action == "catalog_help":
-            self.send("Каталог нужен, если WB/Ozon не отдают публичные цены или веб-поиск недоступен.\n"
-                      "В папке examples есть products.csv с заголовками. Заполни реальными товарами и выполни:\n"
-                      "<code>python -m smm catalog путь_к_файлу.csv</code>\n"
-                      "checked_at — дата проверки ISO, category — outerwear/top/bottom/shoes/hat/bag, "
-                      "winter=true. Можно также включить ограниченный веб-поиск: максимум два поиска за запрос.")
+            self.send("<b>🔎 Автопоиск одежды</b>\n\n"
+                      "В фильтрах канала включи «Автопоиск WB/Ozon». Бот ищет куртку, верх, брюки, обувь, шапку и сумку; сохраняет находки на 12 часов и собирает полный образ в бюджете. Ручной каталог не требуется.\n\n"
+                      "Лимиты этапов, поисков и времени — в «Лимитах». Перезапуск не обнуляет расход и попытки подборки.\n\n"
+                      "Если поиск недоступен для выбранной модели или WB/Ozon скрывают цены, бот сообщает об этом. Непроверенные цены требуют твоего подтверждения.\n\n"
+                      "Генерация двух моделей в одежде через это подключение подписки недоступна. Пока прикрепи изображение к предложению и одобри пост. Для полной автоматизации изображений нужно отдельное подключение генератора.")
         else:
             raise ValueError("Неизвестная кнопка. Открой /menu.")
 

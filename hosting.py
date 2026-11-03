@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from .config import atomic_json, read_config
+from . import __version__
 from .store import Store
 
 
@@ -47,6 +48,7 @@ def main():
         print("Ошибка настройки: " + str(error), flush=True)
         return 1
     print("Python worker: Telegram polling. Данные: " + str(root), flush=True)
+    print("SMM Manager " + __version__ + ": автопоиск одежды, сохранение находок и расширенные лимиты.", flush=True)
     if not (root / "credentials.json").exists():
         print("Вход ChatGPT ещё не перенесён. Меню работает; ИИ требует отдельного подключения.", flush=True)
     from .__main__ import run
