@@ -80,13 +80,13 @@ class Base(unittest.TestCase):
 
 
 class StoreTests(Base):
-    def test_six_profiles_and_seventeen_slots(self):
+    def test_six_profiles_with_three_searches_each(self):
         chs = self.store.channels()
         self.assertEqual(len(chs), 6)
-        self.assertEqual(sum(len(c["config"]["times"]) for c in chs), 17)
+        self.assertEqual(sum(len(c["config"]["search_times"]) for c in chs), 18)
         self.assertTrue(all(not c["enabled"] and not c["target"] for c in chs))
         fashion = next(c for c in chs if c["config"]["mode"] == "fashion")
-        self.assertEqual(fashion["config"]["budgets"], {"15:00": 10000, "21:00": 20000})
+        self.assertEqual(fashion["config"]["budgets"], {"09:00":10000,"15:00": 10000, "21:00": 20000})
 
     def test_pair_not_first_stranger_wins(self):
         code = self.store.pair_code()
@@ -280,17 +280,18 @@ class EngineTests(Base):
         self.assertEqual(self.store.slot(sid)["state"], "expired")
         self.assertFalse(self.tg.published)
 
-    def test_schedule_uses_moscow_and_only_preparation_window(self):
+    def test_search_schedule_uses_moscow_and_never_repeats_a_batch(self):
         self.channel()
         e = self.engine()
-        early = datetime(2026, 11, 3, 8, 19, tzinfo=TZ).timestamp()
+        early = datetime(2026, 11, 3, 8, 59, tzinfo=TZ).timestamp()
         e.create_slots(early)
         self.assertFalse(self.store.rows("SELECT * FROM slots"))
         e.create_slots(early+60)
         e.create_slots(early+61)
         rows = self.store.rows("SELECT * FROM slots")
         self.assertEqual(len(rows), 1)
-        self.assertEqual(datetime.fromtimestamp(rows[0]["due"], TZ).strftime("%H:%M"), "09:00")
+        self.assertEqual(datetime.fromtimestamp(rows[0]["requested_at"], TZ).strftime("%H:%M"), "09:00")
+        self.assertEqual(rows[0]['kind'],'batch')
 
     def test_empty_sources_never_call_ai(self):
         self.channel()

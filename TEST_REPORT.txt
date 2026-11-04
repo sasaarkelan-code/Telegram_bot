@@ -1,11 +1,19 @@
-SMM Manager 1.3.0
-120 local tests passed (python -m unittest discover -s tests -t . -q).
-Includes empty-catalog discovery, source allowlisting, partial result persistence,
-12-hour cache expiry, cache isolation, budget and stock validation, duplicate
-outfit prevention, persistent stage limits, every-stage usage accounting,
-one-time upgrade preserving owner/coowners/model/usage/pause and user budgets,
-navigation, publication and original/flattened mobile-upload startup.
-Network responses are mocked. Live Bothost deployment, account web-search
-availability, real marketplace access and ChatGPT login remain untested.
-Image generation is unavailable through the current subscription connection;
-images must be supplied separately before approving fashion posts.
+Студия / SMM Manager 2.1.0
+
+217 tests passed: python -m unittest discover -s tests -t . -q
+Python 3.11; Flask 3.1.3, Werkzeug 3.1.9, Waitress 3.0.2.
+
+Coverage includes owner/coowner authorization, single-use expiring web login,
+session revocation, CSRF and Origin checks, persistent data migration, safe
+media/HTML handling, independent post scheduling and recovery, limits, search,
+fashion selection, serial campaigns and unknown delivery handling. Network
+account calls are mocked; no real messages or AI requests were made.
+
+JavaScript syntax and Python compilation checked.
+Browser checks with isolated fixture data: dark/light themes, proposal gallery
+and list, post preview, manual scheduling and calendar filtering, quick
+navigation, manager section, mobile 390px layout and modal.
+
+Live Bothost deployment, real Telegram account sends, marketplace results,
+physical-device PWA installation and Docker image build were not tested here.
+Credentials, sessions, databases and QA launchers are excluded from the ZIP.

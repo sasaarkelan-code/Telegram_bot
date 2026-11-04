@@ -1,0 +1,4 @@
+{$SMM_DOMAIN} {
+    encode zstd gzip
+    reverse_proxy studio:8000
+}

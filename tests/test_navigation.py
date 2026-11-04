@@ -37,7 +37,7 @@ class NavigationTests(Base):
         self.message('📣 Менеджер')
         self.message('/menu')
         labels=self.labels(self.tg.messages[-1][2])
-        self.assertEqual(set(labels),{'📰 СММ','📣 Менеджер','👥 Совладельцы'})
+        self.assertEqual(set(labels),{'📰 СММ','📣 Менеджер','👥 Совладельцы','🌐 Веб-панель'})
 
     def test_form_cancel_returns_to_campaigns_and_clears_input(self):
         self.message('📣 Менеджер')

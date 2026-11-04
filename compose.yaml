@@ -1,0 +1,36 @@
+services:
+  studio:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      SMM_DATA_DIR: /app/data/smm
+      PORT: "8000"
+      SMM_WEB_ENABLED: "1"
+    volumes:
+      - ${SMM_HOST_DATA_DIR:-./persistent-data}:/app/data
+    expose:
+      - "8000"
+    stop_grace_period: 45s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      SMM_DOMAIN: ${SMM_DOMAIN:?Укажи SMM_DOMAIN в .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - studio
+volumes:
+  caddy_data:
+  caddy_config:

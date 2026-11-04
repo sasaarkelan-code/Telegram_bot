@@ -18,4 +18,14 @@ if not (root / "smm").is_dir():
 from smm.hosting import main
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ['web-code']:
+        from smm.hosting import configure
+        from smm.webapp import issue_code
+        data_root, store = configure()
+        print('Код входа на 5 минут:', issue_code(store, store.get('owner')))
+        raise SystemExit(0)
+    if sys.argv[1:] == ['manager-login']:
+        import os
+        from smm.account import login_cli
+        raise SystemExit(login_cli(Path(os.environ.get('SMM_DATA_DIR','/app/data/smm')).expanduser()))
     raise SystemExit(main())

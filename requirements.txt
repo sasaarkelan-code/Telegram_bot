@@ -1,2 +1,6 @@
 cryptography>=44
-tzdata>=2025.1; platform_system == "Windows"
+Telethon>=1.45,<2
+tzdata>=2025.1
+Flask>=3.1,<4
+waitress>=3.0.2,<4
+Pillow>=11,<13

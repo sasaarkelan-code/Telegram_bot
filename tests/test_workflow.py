@@ -14,7 +14,7 @@ from smm.ui import UI
 
 class WorkflowTests(Base):
     def test_rss_to_two_proposals_to_approved_scheduled_post(self):
-        at = int(datetime(2026, 11, 3, 8, 20, tzinfo=TZ).timestamp())
+        at = int(datetime(2026, 11, 3, 9, 0, tzinfo=TZ).timestamp())
         self.channel()
         source = self.store.channel(1)["config"]["sources"][0]
         articles = [
@@ -48,14 +48,17 @@ class WorkflowTests(Base):
         ui = UI(self.store, self.tg, FakeAuth(), engine)
         ui.show_post(pending[0]["id"])
         self.assertGreater(len(self.tg.messages), 0)
-        self.store.approve(pending[0]["id"], at+600)
-        engine.publish(at+2399)
+        self.store.schedule(pending[0]['id'],at+3600,at+600)
+        self.store.schedule(pending[1]['id'],at+7200,at+600)
+        engine.publish(at+3599)
         self.assertFalse(self.tg.published)
-        engine.publish(at+2400)
-        engine.publish(at+2401)
+        engine.publish(at+3600)
+        engine.publish(at+3601)
         self.assertEqual(len(self.tg.published), 1)
         self.assertIn("Научная станция", self.tg.published[0][1])
         self.assertNotIn("торговле", self.tg.published[0][1])
+        engine.publish(at+7200)
+        self.assertEqual(len(self.tg.published),2)
         self.assertEqual(len(payloads), 1)
 
     def test_notification_failure_is_queued_for_later(self):

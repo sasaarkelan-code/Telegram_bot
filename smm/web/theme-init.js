@@ -1,0 +1,1 @@
+try{const theme=localStorage.getItem('studio-theme')==='light'?'light':'dark';document.documentElement.dataset.theme=theme;document.querySelector('meta[name="theme-color"]')?.setAttribute('content',theme==='light'?'#f5f6f8':'#101216');}catch{document.documentElement.dataset.theme='dark';}
