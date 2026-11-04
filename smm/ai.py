@@ -151,7 +151,7 @@ class AI:
             if not isinstance(result, dict):
                 raise AIError("Неожиданный формат ответа.")
             self.budget.finish(rid, usage)
-            if not isinstance(usage,dict) or any(type(usage.get(k)) is not int or usage[k]<0 for k in ('input_tokens','output_tokens')):
+            if rid is not None and self.store.get('budget_enforced',True) and (not isinstance(usage,dict) or any(type(usage.get(k)) is not int or usage[k]<0 for k in ('input_tokens','output_tokens'))):
                 raise BudgetStop("Расход ответа не подтверждён. Проверь «Лимиты».")
             # A known budget stop blocks further calls/publication; it must not
             # discard an already-paid, completed result that can become a draft.

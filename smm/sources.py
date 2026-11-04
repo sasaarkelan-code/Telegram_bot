@@ -124,7 +124,7 @@ class Sources:
     def collect(self, channel, now=None):
         now = int(time.time() if now is None else now)
         errors = []
-        for source in channel["config"]["sources"][:5]:
+        for source in channel["config"]["sources"][:30]:
             cache = self.store.rows("SELECT * FROM feed_cache WHERE url=?", (source,))
             cache = cache[0] if cache else {}
             if cache.get("checked", 0) > now-600:
@@ -135,7 +135,7 @@ class Sources:
             if cache.get("modified"):
                 headers["If-Modified-Since"] = cache["modified"]
             try:
-                raw, h, _ = fetch(source, headers)
+                raw, h, _ = fetch(source, headers, timeout=8)
                 if h.get("Status") != "304":
                     for p in parse_feed(raw, source, now):
                         if not p["published"] or p["published"] > now+300:
@@ -146,7 +146,7 @@ class Sources:
                             p["image"] = ""
                         self.store.execute("""INSERT INTO articles(url,title,summary,source,published,image,fingerprint,fetched)
                                               VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(url) DO UPDATE SET
-                                              summary=excluded.summary,fetched=excluded.fetched""",
+                                              summary=excluded.summary,image=CASE WHEN excluded.image!='' THEN excluded.image ELSE articles.image END,fetched=excluded.fetched""",
                                            (p["url"], p["title"], p["summary"], source, p["published"], p["image"], fingerprint(p["title"]), now))
                 self.store.execute("INSERT OR REPLACE INTO feed_cache VALUES(?,?,?,?,?)",
                                    (source, h.get("ETag", cache.get("etag")), h.get("Last-Modified", cache.get("modified")), now, ""))
@@ -159,7 +159,7 @@ class Sources:
     def shortlist(self, channel, now=None):
         now = int(time.time() if now is None else now)
         cfg = channel["config"]
-        srcs = cfg["sources"][:5]
+        srcs = cfg["sources"][:30]
         if not srcs:
             return []
         marks = ",".join("?" for _ in srcs)
@@ -169,6 +169,10 @@ class Sources:
               JOIN slots s ON s.id=p.slot_id WHERE ca.article_id=a.id AND s.channel_id=?)
             ORDER BY published DESC LIMIT 50""", (*srcs, now-cfg["max_age_hours"]*3600, now, channel["id"]))
         chosen, seen = [], set()
+        # Mix publishers before spending tokens on a short model context.
+        groups={}
+        for r in rows: groups.setdefault(r["source"],[]).append(r)
+        rows=[group[i] for i in range(max((len(g) for g in groups.values()),default=0)) for group in groups.values() if i<len(group)]
         for r in rows:
             text = (r["title"]+" "+r["summary"]).lower()
             if any(w.lower() in text for w in cfg["exclude"]):

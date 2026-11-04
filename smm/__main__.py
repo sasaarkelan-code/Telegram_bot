@@ -65,8 +65,8 @@ def setup(root, store):
         print("/start "+code)
         print("Код действует 30 минут. Чтобы выпустить новый: python -m smm pair")
     else:
-        print("Владелец уже привязан. Меню доступно через /start.")
-    print("\nДалее: LOGIN.bat → вход ChatGPT → в Telegram «Каналы» и «Продолжить».")
+        print("Владелец уже привязан. Вход на сайт — через /web.")
+    print("\nДалее: LOGIN.bat → вход ChatGPT → на сайте «Каналы» и «Продолжить».")
     print("Твои данные сохраняются в:", root)
 
 
@@ -101,7 +101,7 @@ def run(root, store):
     from .ai import AI
     from .engine import Engine
     from .telegram import Telegram
-    from .navigation import PanelUI as UI
+    from .web_access import WebAccess
 
     config = read_config(root)
     token = config.get("telegram_token")
@@ -111,31 +111,26 @@ def run(root, store):
         store.recover()
         auth, telegram = Auth(root), Telegram(token, media_root=root / "media")
         engine = Engine(store, telegram, AI(store, auth))
-        ui = UI(store, telegram, auth, engine)
+        access = WebAccess(store, telegram)
         from .account import AccountGateway
         from .manager import Manager
         manager=Manager(store,AccountGateway(root))
         web_server = None
-        if os.environ.get('SMM_WEB_ENABLED', '1') != '0':
-            from .webapp import start_server
-            web_server = start_server(root,store,engine,auth,telegram,manager)
+        if os.environ.get('SMM_WEB_ENABLED', '1') == '0':
+            raise ValueError('Управление перенесено на сайт. Для запуска включи SMM_WEB_ENABLED=1.')
+        from .webapp import start_server
+        web_server = start_server(root,store,engine,auth,telegram,manager)
+        try:
+            access.configure()
+        except NetError:
+            print('Не удалось обновить список команд Telegram. Вход через /web доступен после восстановления связи.')
         scheduler = threading.Thread(target=engine.loop, daemon=True)
         scheduler.start()
         publisher = threading.Thread(target=engine.publisher_loop, daemon=True)
         publisher.start()
         account_worker=threading.Thread(target=manager.loop,args=(engine.shutdown,),daemon=True)
         account_worker.start()
-        def notify_loop():
-            while not engine.shutdown.wait(3):
-                try:
-                    ui.deliver()
-                except NetError:
-                    pass
-                except Exception as e:
-                    store.halt("Ошибка доставки предложений ("+type(e).__name__+"). Проверь очередь.")
-        notifier = threading.Thread(target=notify_loop, daemon=True)
-        notifier.start()
-        print("SMM Manager", __version__, "запущен. Управление — в твоём Telegram-боте.")
+        print("SMM Manager", __version__, "запущен. Управление и уведомления — только на сайте. Telegram — ключ для входа.")
         print("Это окно нужно оставить открытым. Ctrl+C — остановка.")
         print("Автоподбор до двух постов трижды в день. Время публикации каждому посту назначает владелец, МСК.")
         if not store.get("owner", 0):
@@ -150,16 +145,15 @@ def run(root, store):
                 try:
                     updates = telegram.updates(store.get("offset", 0))
                     for u in updates:
-                        ui.handle(u)
+                        access.handle(u)
                         store.put("offset", u["update_id"]+1)
                 except NetError:
                     # Telegram reconnects never create model requests.
                     print("Telegram временно недоступен. Ожидание соединения, без вызовов ИИ.")
                     time.sleep(5)
                 except Exception as e:
-                    manager.stop(reason='Ошибка меню. Рассылки остановлены; проверь управление.')
-                    store.halt("Ошибка меню ("+type(e).__name__+"). Публикации и ИИ остановлены.")
-                    print("Защитная остановка. Тип ошибки:", type(e).__name__)
+                    store.notice('web-access-error:'+str(int(time.time())//60), 'Ошибка получения кода Telegram ('+type(e).__name__+'). Проверь подключение бота. Управление доступно на сайте.')
+                    print('Ошибка Telegram-входа:', type(e).__name__)
                     time.sleep(2)
         except KeyboardInterrupt:
             manager.stop(reason='Процесс остановлен владельцем.')
@@ -197,7 +191,7 @@ def doctor(root, store, network=False):
 def main():
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
-    parser = argparse.ArgumentParser(description="SMM Manager — локальный Telegram-редактор")
+    parser = argparse.ArgumentParser(description="SMM Manager — веб-студия управления каналами")
     parser.add_argument("--data", help="Отдельная папка данных")
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("setup", "pair", "run", "stop", "model"):
@@ -236,7 +230,7 @@ def main():
             run(root, store)
         elif args.command == "stop":
             store.halt("Аварийная остановка с компьютера.")
-            print("ИИ и публикации остановлены. Для продолжения используй кнопку в Telegram.")
+            print("ИИ и публикации остановлены. Для продолжения используй кнопку на сайте.")
         elif args.command == "catalog":
             from .sources import Sources
             print("Реальных товаров импортировано:", Sources(store).import_products(args.path))

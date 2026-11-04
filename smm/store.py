@@ -61,7 +61,7 @@ class Store:
             """)
             if not c.in_transaction:
                 c.execute("BEGIN IMMEDIATE")
-            for table,fields in {'slots':{'kind':"TEXT NOT NULL DEFAULT 'legacy'",'requested_at':'INTEGER NOT NULL DEFAULT 0',
+            for table,fields in {'notices':{'created':'INTEGER NOT NULL DEFAULT 0'},'slots':{'kind':"TEXT NOT NULL DEFAULT 'legacy'",'requested_at':'INTEGER NOT NULL DEFAULT 0',
                                          'search_cancelled':'INTEGER NOT NULL DEFAULT 0','automatic':'INTEGER NOT NULL DEFAULT 0'},
                                  'candidates':{'scheduled_at':'INTEGER','publication_error':"TEXT NOT NULL DEFAULT ''"}}.items():
                 columns={r['name'] for r in c.execute('PRAGMA table_info('+table+')').fetchall()}
@@ -122,6 +122,25 @@ class Store:
                         c.execute("UPDATE slots SET state='cancelled' WHERE id=? AND state NOT IN ('sent','publishing','unknown')",(old['id'],))
                 self.put('manual_publication_v1',True,c)
                 self.notice('manual-publication:1','📅 Время публикации выбираешь ты для каждого поста. Автоподбор: до двух постов в 09:00, 15:00 и 21:00 МСК. Для каждого канала есть «Найти 2 сейчас» и переключатель автоподбора. Старые одобренные публикации сохранены.',c)
+
+            if not self.get('sources_v22',False,c):
+                from .source_presets import PRESETS, preset_for
+                for row in c.execute('SELECT id,name,config FROM channels').fetchall():
+                    cfg=json.loads(row['config']); kind=preset_for(row['name'],cfg)
+                    if kind:
+                        cfg['sources']=list(dict.fromkeys(cfg.get('sources',[])+PRESETS[kind]))[:30]
+                        c.execute('UPDATE channels SET config=? WHERE id=?',(json.dumps(cfg,ensure_ascii=False),row['id']))
+                self.put('sources_v22',True,c)
+                self.notice('sources:22','Добавлены источники для финансов, футбола, ИИ и кино. Свои ссылки сохранены. В каналах видны результаты проверки источников.',c)
+            if self.get('fashion_unmetered',None,c) is None:
+                self.put('fashion_unmetered',True,c)
+                limits=self.get('limits',{},c)
+                limits['fashion_web_calls']=max(limits.get('fashion_web_calls',3),6)
+                limits['fashion_seconds']=max(limits.get('fashion_seconds',120),180)
+                self.put('limits',limits,c)
+            if self.get('budget_enforced',None,c) is None:
+                self.put('budget_enforced',True,c)
+                self.notice('budget-mode:22','Для «Собрано» внутренний учёт токенов и бюджетные остановки отключены. Остальные каналы используют свои лимиты; режим предупреждений доступен в разделе «Расход».',c)
 
     @contextlib.contextmanager
     def tx(self):
@@ -200,7 +219,7 @@ class Store:
         if c is None:
             with self.tx() as conn:
                 return self.notice(key, text, conn)
-        c.execute("INSERT OR IGNORE INTO notices(notice_key,text) VALUES(?,?)", (key, text))
+        c.execute("INSERT OR IGNORE INTO notices(notice_key,text,created) VALUES(?,?,?)", (key, text, int(time.time())))
 
     def halt(self, reason, c=None):
         if c is None:

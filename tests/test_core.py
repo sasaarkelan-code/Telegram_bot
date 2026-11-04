@@ -57,6 +57,8 @@ class Base(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.store = Store(Path(self.tmp.name)/"test.sqlite")
         self.store.put("paused", False)
+        self.store.put("budget_enforced", True)
+        self.store.put("fashion_unmetered", False)
         self.store.put("model", "test-model")
         self.now = int(time.time())
         self.tg = FakeTelegram()
@@ -197,6 +199,8 @@ class BudgetTests(Base):
         b.finish(rid, {"input_tokens": 400, "output_tokens": 300}, now=self.now)
         self.store.halt("test")
         self.store.put("paused", False)
+        self.store.put("budget_enforced", True)
+        self.store.put("fashion_unmetered", False)
         self.assertEqual(b.usage(self.now)["tokens"], 700)
 
     def test_rolling_window_crosses_midnight(self):
@@ -261,6 +265,8 @@ class EngineTests(Base):
         self.assertEqual(self.store.slot(sid)["state"], "unknown")
         self.store.recover()
         self.store.put("paused", False)
+        self.store.put("budget_enforced", True)
+        self.store.put("fashion_unmetered", False)
         e.publish(self.now+2)
         self.assertEqual(len(self.tg.published), 1)
 

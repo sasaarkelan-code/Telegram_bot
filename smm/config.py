@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from .source_presets import PRESETS
 
 
 def data_dir() -> Path:
@@ -37,9 +38,9 @@ DEFAULT_LIMITS = {
     "request_output_bytes": 6500,
     "request_seconds": 90,
     "web_calls": 2,
-    "fashion_web_calls": 3,
+    "fashion_web_calls": 6,
     "fashion_output_bytes": 16000,
-    "fashion_seconds": 120,
+    "fashion_seconds": 180,
     "fashion_steps": 2,
     "fashion_slot_tokens": 24000,
     "lead_minutes": 40,
@@ -52,10 +53,10 @@ DEFAULT_CHANNELS = [
          sources=["https://feeds.bbci.co.uk/news/world/rss.xml", "https://news.un.org/feed/subscribe/ru/news/all/rss.xml"]),
     dict(name="Капитал по делу", mode="news", topic="Вклады, инвестиции и финансовые новости. Условия продуктов с датой и источником, понятные разборы. Не давать персональных инвестиционных рекомендаций и не выдумывать цитаты.",
          times=["09:00", "15:00", "21:00"], max_age_hours=36,
-         sources=["https://www.cbr.ru/rss/RssNews"]),
+         sources=PRESETS["finance"]),
     dict(name="Нейросети на практике", mode="news", topic="Нейросети: значимые обновления, полезные сервисы, практическое применение и проверяемые инструкции. Не придумывать доступность, цены и функции.",
          times=["09:00", "15:00", "21:00"], max_age_hours=48,
-         sources=["https://openai.com/news/rss.xml", "https://blogs.microsoft.com/ai/feed/"]),
+         sources=PRESETS["ai"]),
     dict(name="Игровая сводка", mode="news", topic="Видеоигры: важные анонсы, релизы, обновления и раздачи. Указывать платформу, регион и срок акции, если они известны.",
          times=["09:00", "15:00", "21:00"], max_age_hours=48,
          sources=["https://blog.playstation.com/feed/", "https://news.xbox.com/en-us/feed/"]),
@@ -64,7 +65,7 @@ DEFAULT_CHANNELS = [
          budgets={"15:00": 10000, "21:00": 20000}, web_search=True),
     dict(name="Кино на вечер", mode="cinema", topic="Два интересных фильма или сериала на выбор. Название, год, коротко кому подойдёт, без спойлеров. Изучить настоящие отзывы; не выдавать рекламный анонс за отзыв, не сочинять рейтинг и цитаты.",
          times=["21:00"], max_age_hours=336,
-         sources=["https://thefilmstage.com/feed/"]),
+         sources=PRESETS["cinema"]),
 ]
 
 

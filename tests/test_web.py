@@ -29,7 +29,7 @@ class WebTests(unittest.TestCase):
         return self.s.add_candidates(sid,[dict(title='Пост',body='Текст проверенного поста'),dict(title='Второй',body='Другой проверенный пост')],time.time())
     def test_public_shell_private_data(self):
         with self.c.get('/') as r:self.assertEqual(r.status_code,200)
-        self.assertEqual(self.c.get('/healthz').json['version'],'2.1.0')
+        self.assertEqual(self.c.get('/healthz').json['version'],'2.3.0')
         self.assertEqual(self.c.get('/api/state').status_code,401)
         with self.c.get('/assets/app.js') as r:self.assertEqual(r.status_code,200)
     def test_code_single_use_and_cookie(self):
@@ -89,6 +89,43 @@ class WebTests(unittest.TestCase):
         self.login();self.assertEqual(self.post('/api/limits',{'daily_tokens':400000}).status_code,200)
         self.assertEqual(self.post('/api/limits',{'fashion_steps':99}).status_code,400)
         self.assertEqual(self.s.get('limits')['daily_tokens'],400000)
+
+    def test_notices_private_and_read_cursor_is_per_actor(self):
+        self.s.notice('test-event','Saved for the web only')
+        self.assertEqual(self.c.get('/api/state').status_code,401)
+        self.login()
+        state=self.c.get('/api/state').json
+        latest=state['notices'][0]['id']
+        self.assertGreater(state['notice_unread'],0)
+        self.assertEqual(self.post('/api/notices/read',{'until':latest}).status_code,200)
+        self.assertEqual(self.c.get('/api/state').json['notice_unread'],0)
+        self.s.put('coowners',[12346])
+        self.login(12346)
+        self.assertGreater(self.c.get('/api/state').json['notice_unread'],0)
+
+    def test_read_notice_does_not_hide_future_events(self):
+        self.login()
+        self.assertEqual(self.post('/api/notices/read',{'until':999999}).status_code,200)
+        self.s.notice('after-read','A later event')
+        self.assertEqual(self.c.get('/api/state').json['notice_unread'],1)
+        self.assertEqual(self.post('/api/notices/read',{'until':-1}).status_code,400)
+        self.assertEqual(self.c.post('/api/notices/read',json={'until':1}).status_code,403)
+
+    def test_source_presets_and_health_are_private_state(self):
+        self.login()
+        state=self.c.get('/api/state').json
+        self.assertGreater(len(state['source_presets']['ai']),2)
+        self.assertGreater(len(state['source_presets']['cinema']),1)
+        self.assertTrue(state['fashion_unmetered'])
+        self.assertIsInstance(state['source_health'],list)
+
+    def test_warning_mode_can_be_changed_without_resetting_limits(self):
+        self.login()
+        original=self.s.get('limits')
+        self.assertEqual(self.post('/api/limits',{'budget_enforced':False}).status_code,200)
+        self.assertFalse(self.s.get('budget_enforced'))
+        self.assertEqual(self.s.get('limits'),original)
+        self.assertEqual(self.post('/api/limits',{'budget_enforced':'false'}).status_code,400)
     def test_search_and_stop(self):
         self.login();self.candidates();self.assertEqual(self.post('/api/channels/1',{'action':'search'}).status_code,400)
         self.assertEqual(self.post('/api/control',{'action':'resume'}).status_code,200)

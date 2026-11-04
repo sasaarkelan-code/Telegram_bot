@@ -17,7 +17,7 @@ FULL = """Ты стилист. Сразу выбери цельный интер
 есть запасной полный образ, можно добавить второй БЕЗ дополнительных поисков.
 Соблюдай topic/style/include/exclude, пол и сочетаемость вещей. Не повторяй recent.
 Не делай отдельных этапов планирования, не перебирай десятки вариантов.
-При наличии web используй максимум 2 поисковых вызова на ВСЮ подборку.
+При наличии web используй максимум 4 поисковых вызова на ВСЮ подборку.
 Новые вещи — только реально просмотренные прямые карточки WB/Ozon из источников поиска:
 название, category, price в рублях, url, winter=true, image если известна реальная ссылка.
 Цены, ссылки и наличие не выдумывай. Из catalog используй только {"id":число}.
@@ -30,7 +30,7 @@ FULL = """Ты стилист. Сразу выбери цельный интер
 REPAIR = """Исправь ТОЛЬКО replace_categories указанного зимнего образа.
 Остальные kept вещи уже выбраны: их не ищи заново и не заменяй. Сохрани стиль и пол.
 На ВСЕ замены есть remaining_budget рублей. Сначала используй catalog.
-Максимум 2 web поиска, если web доступен. Только реальные прямые карточки WB/Ozon
+Максимум 4 web поиска, если web доступен. Только реальные прямые карточки WB/Ozon
 из источников поиска, без выдуманных цен/наличия/фото. Не повторяй avoid_urls.
 Ответ JSON: {"items":[{"id":1},{"name":"...","category":"shoes","price":1500,
 "url":"просмотренная карточка","winter":true}]}. id — только из catalog.
@@ -154,7 +154,7 @@ class Fashion:
 
         def call(instructions,ctx,web):
             if self.store.get('paused',True): raise BudgetStop('Новые запросы остановлены; уже найденные образы сохранены.')
-            if self.store.get('fashion_spend_closed:'+str(sid),False): raise BudgetStop('Расход этой подборки выше ожидаемого; нового запроса не будет. Находки сохранены.')
+            if not self.store.get('fashion_unmetered',True) and self.store.get('budget_enforced',True) and self.store.get('fashion_spend_closed:'+str(sid),False): raise BudgetStop('Расход этой подборки выше ожидаемого; нового запроса не будет. Находки сохранены.')
             if self.clock()>=slot['due']-180: raise AIError('Окно подготовки закончилось; находки сохранены.')
             with self.store.tx() as c:
                 used=self.store.get(step_key,0,c)
@@ -231,7 +231,7 @@ class Fashion:
 
         def repair(fix):
             nonlocal stage
-            if not fix or self.store.get('paused',True) or self.store.get(step_key,0)>=cap or self.store.get('fashion_spend_closed:'+str(sid),False):
+            if not fix or self.store.get('paused',True) or self.store.get(step_key,0)>=cap or (not self.store.get('fashion_unmetered',True) and self.store.get('budget_enforced',True) and self.store.get('fashion_spend_closed:'+str(sid),False)):
                 return []
             repair_key='fashion_repaired:'+str(sid)
             with self.store.tx() as c:

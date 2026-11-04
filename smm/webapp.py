@@ -19,12 +19,13 @@ from werkzeug.exceptions import HTTPException
 
 from . import __version__
 from .budget import Budget
+from .source_presets import PRESETS
 from .editor import render, utf16
 from .manager import Manager, parse_targets
 from .net import NetError, public_url
 from .planning import publication_time
 from .store import TZ
-from .ui import LIMIT_FIELDS, parse_times
+from .settings import LIMIT_FIELDS, parse_times
 
 
 def digest(value):
@@ -208,17 +209,30 @@ def create_app(root, store, engine, auth, telegram, manager=None, env=None):
                 row['preview_html']='<b>'+html.escape(row['title'])+'</b>\n\n'+html.escape(row['body'])
             posts.append(row)
         channels = store.channels()
+        notice_read = store.get('web_notice_read:'+str(g.actor),0)
         return jsonify(version=__version__, actor=g.actor, username=store.get('web_username:'+str(g.actor),''), csrf=g.csrf, now=int(time.time()), timezone='Europe/Moscow',
+            notices=store.rows('SELECT id,text,created FROM notices ORDER BY id DESC LIMIT 100'),
+            notice_read=notice_read, notice_unread=store.rows('SELECT COUNT(*) AS n FROM notices WHERE id>?',(notice_read,))[0]['n'],
             paused=store.get('paused', True), pause_reason=store.get('pause_reason', ''),
             model=store.get('model',''), models=store.get('model_catalog',[]), ai_connected=auth.saved(),
             channels=channels, posts=posts, searches=store.rows("SELECT id,channel_id,state,error,requested_at FROM slots WHERE kind='batch' ORDER BY id DESC LIMIT 60"),
-            usage=Budget(store).usage(), limits=store.get('limits'),
+            usage=Budget(store).usage(), limits=store.get('limits'), budget_enforced=store.get('budget_enforced',True), fashion_unmetered=store.get('fashion_unmetered',True),
+            source_health=store.rows('SELECT url,checked,error FROM feed_cache'), source_presets=PRESETS,
             campaigns=manager.entries(), account=store.get('manager_account',{}), cooldown=store.get('manager_cooldown',0),
             deliveries=store.rows('SELECT id,campaign,target,started,completed,state,error FROM manager_deliveries ORDER BY id DESC LIMIT 100'),
             partners=store.rows('SELECT * FROM manager_channels ORDER BY favorite DESC,found DESC LIMIT 300'),
             partner_filter=store.get('manager_partner_filter',{}), partner_search=store.get('manager_search',{}),
             owner=store.get('owner'), coowners=store.get('coowners',[]),
             audit=store.rows('SELECT actor,action,created FROM web_audit ORDER BY id DESC LIMIT 40'))
+
+    @app.post('/api/notices/read')
+    def read_notices():
+        until=number(data().get('until'),0,2**63-1)
+        with store.tx() as c:
+            latest=c.execute('SELECT COALESCE(MAX(id),0) FROM notices').fetchone()[0]
+            key='web_notice_read:'+str(g.actor)
+            store.put(key,max(store.get(key,0,c),min(until,latest)),c)
+        return jsonify(ok=True)
 
     @app.post('/api/control')
     def control():
@@ -371,10 +385,15 @@ def create_app(root, store, engine, auth, telegram, manager=None, env=None):
     @app.post('/api/limits')
     def limits():
         incoming=data(); current=store.get('limits')
-        if not incoming or set(incoming)-set(LIMIT_FIELDS): raise ValueError('Неизвестная настройка лимитов.')
+        if not incoming or set(incoming)-(set(LIMIT_FIELDS)|{'budget_enforced'}): raise ValueError('Неизвестная настройка лимитов.')
         for key,value in incoming.items():
+            if key=='budget_enforced':
+                if type(value) is not bool: raise ValueError('Нужен переключатель режима бюджета.')
+                continue
             _,low,high=LIMIT_FIELDS[key]; current[key]=number(value,low,high)
-        store.put('limits',current); audit('Изменены лимиты ИИ')
+        store.put('limits',current)
+        if 'budget_enforced' in incoming: store.put('budget_enforced',incoming['budget_enforced'])
+        audit('Изменены лимиты ИИ')
         return jsonify(ok=True)
 
     @app.post('/api/model')

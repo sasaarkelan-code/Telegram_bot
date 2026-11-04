@@ -12,6 +12,7 @@ from .budget import Budget
 from .editor import image_prompt, render, utf16
 from .net import NetError, public_url
 from .store import TZ
+from .settings import LIMIT_FIELDS, parse_times
 from .telegram import MENU, keyboard
 
 FIELDS = {
@@ -24,30 +25,12 @@ FIELDS = {
     "max_age_hours": "Возраст материалов, часы",
     "budgets": "Бюджеты образов",
 }
-LIMIT_FIELDS = {
-    "daily_tokens": ("Токенов за день", 12000, 2000000),
-    "rolling_tokens": ("Токенов за 5 часов", 12000, 1000000),
-    "channel_daily_tokens": ("На канал за день", 12000, 1000000),
-    "daily_requests": ("Запросов за день", 1, 500),
-    "hourly_requests": ("Запросов за час", 1, 100),
-    "fashion_steps": ("Запросов на подборку одежды", 1, 2),
-    "fashion_slot_tokens": ("Токенов на одну подборку одежды", 12000, 60000),
-    "fashion_web_calls": ("Поисков за один запрос одежды", 1, 3),
-    "fashion_seconds": ("Секунд на поисковый запрос", 30, 240),
-}
 
 
 def when(ts):
     return datetime.fromtimestamp(ts, TZ).strftime("%d.%m %H:%M МСК")
 
 
-def parse_times(text):
-    values = re.split(r"[\s,;]+", text.strip())
-    if not 1 <= len(values) <= 8 or len(set(values)) != len(values):
-        raise ValueError("Укажи от 1 до 8 разных времён через пробел.")
-    if any(not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", x) for x in values):
-        raise ValueError("Формат времени: 09:00 15:00 21:00.")
-    return sorted(values)
 
 
 class UI:
@@ -153,16 +136,18 @@ class UI:
     def limits(self, edit=False):
         limits = self.store.get("limits")
         u = Budget(self.store).usage()
+        clothing = '«Собрано»: внутренний учёт новых токенов и бюджетные остановки отключены.\n' if self.store.get('fashion_unmetered',True) else f'Одежда: до {limits["fashion_slot_tokens"]:,} токенов на подборку.\n'
+        accounting = 'При неизвестном расходе сохраняется резерв; в строгом режиме бот останавливается.\n'
         self.send("<b>📊 Расход и защита</b>\n\n"
                   f'День: {u["tokens"]:,} / {limits["daily_tokens"]:,} токенов\n'
                   f'Последние 5 ч: {u["rolling"]:,} / {limits["rolling_tokens"]:,}\n'
                   f'Запросы за день: {u["requests"]} / {limits["daily_requests"]}\n'
                   f'Запросы за час: {u["hourly"]} / {limits["hourly_requests"]}\n'
                   f'Неопределённых/незавершённых расходов: {u["uncertain"]}\n\n'
-                  f'Одежда: до {min(2,limits["fashion_steps"])} запросов и {limits["fashion_slot_tokens"]:,} токенов с резервом на подборку.\n'
+                  + clothing +
                   f'До {limits["fashion_web_calls"]} поисков за запрос, {limits["fashion_seconds"]} сек.\n'
                   'Готовые и запасные образы сохраняются на сутки; ссылки и сумма проверяются кодом.\n\n'
-                  "Учитываются input + output из usage. Если usage не пришёл, засчитывается резерв, и бот останавливается.\n"
+                  + accounting +
                   "Это расход только этого бота, не остаток всей подписки. Запрос в работе может потратить больше резерва: "
                   "официальный вход не поддерживает серверный max_output_tokens.\n"
                   "Счётчики после перезапуска и кнопки «Продолжить» сохраняются.",
@@ -348,8 +333,8 @@ class UI:
                         cfg["budgets"].setdefault(t, 10000)
             elif field == "sources":
                 urls = [] if text == "-" else [public_url(x) for x in text.split()]
-                if len(urls) > 5:
-                    raise ValueError("Для экономии максимум 5 RSS/JSON Feed на канал.")
+                if len(urls) > 30:
+                    raise ValueError("Максимум 30 RSS/JSON Feed на канал.")
                 cfg[field] = list(dict.fromkeys(urls))
             elif field in ("include", "exclude"):
                 cfg[field] = [] if text == "-" else [w.strip().lower() for w in text.split(",") if w.strip()][:20]
@@ -462,7 +447,7 @@ class UI:
                 raise ValueError("Неизвестный фильтр.")
             self.store.session(self.owner, "field", {"cid": value, "field": key})
             hints = dict(search_times="Три времени, например: 09:00 15:00 21:00. Это время поиска, публикацию назначаешь отдельно.",
-                         sources="Ссылки RSS/JSON Feed через пробел. Максимум 5. Знак - очищает список.",
+                         sources="Ссылки RSS/JSON Feed через пробел. Максимум 30. Знак - очищает список.",
                          include="Через запятую; подходят материалы хотя бы с одним словом. Знак - отключает фильтр.",
                          exclude="Через запятую. Знак - очищает список.",
                          budgets="Например: 09:00=10000 15:00=10000 21:00=20000")

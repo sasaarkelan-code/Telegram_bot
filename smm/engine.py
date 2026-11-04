@@ -81,7 +81,7 @@ class Engine:
                 errors = self.sources.collect(ch, now)
                 articles = self.sources.shortlist(ch, now)
                 if not articles:
-                    reason = "Свежих подходящих материалов нет."
+                    reason = "Источники не добавлены. Открой настройки канала." if not cfg["sources"] else "Нет новых материалов за выбранный период после фильтров и исключения уже предложенного. Проверь возраст новостей, ключевые и стоп-слова."
                     if errors:
                         reason += " Не удалось прочитать: " + ", ".join(errors) + ". Проверь источники в фильтрах."
                     self.fail(sid, reason)
@@ -113,7 +113,7 @@ class Engine:
                         raise
             if not opts:
                 if self.store.slot(sid)['search_cancelled']: return
-                self.fail(sid, "ИИ не предложил проверяемых подходящих вариантов. Повтора за твой счёт не будет.")
+                self.fail(sid, "Материалы найдены, но нет картинки для обязательного фото. Прикрепи изображение или отключи требование в настройках канала." if cfg.get("require_photo") and cfg["mode"]!="fashion" and not any(a.get("image") for a in articles) else "ИИ не предложил проверяемых подходящих вариантов. Повтора за твой счёт не будет.")
                 return
             # Cheap, deterministic cross-slot checks after the model's semantic check.
             history = self.store.rows("""SELECT p.title,p.event_key FROM candidates p JOIN slots s ON s.id=p.slot_id
