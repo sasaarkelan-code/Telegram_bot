@@ -48,7 +48,7 @@ def main():
         print("Ошибка настройки: " + str(error), flush=True)
         return 1
     print("Python worker: Telegram polling. Данные: " + str(root), flush=True)
-    print("SMM Manager " + __version__ + ": два предложения и публикации в выбранное тобой время.", flush=True)
+    print("SMM Manager " + __version__ + ": автоматический поиск, проверка ИИ и публикации по расписанию.", flush=True)
     if not (root / "credentials.json").exists():
         print("Вход ChatGPT ещё не перенесён. Сайт доступен; ИИ требует отдельного подключения.", flush=True)
     if os.environ.get('SMM_WEB_ENABLED','1') != '0' and not store.get('web_backup_2',False):

@@ -61,9 +61,9 @@ class Store:
             """)
             if not c.in_transaction:
                 c.execute("BEGIN IMMEDIATE")
-            for table,fields in {'notices':{'created':'INTEGER NOT NULL DEFAULT 0'},'slots':{'kind':"TEXT NOT NULL DEFAULT 'legacy'",'requested_at':'INTEGER NOT NULL DEFAULT 0',
-                                         'search_cancelled':'INTEGER NOT NULL DEFAULT 0','automatic':'INTEGER NOT NULL DEFAULT 0'},
-                                 'candidates':{'scheduled_at':'INTEGER','publication_error':"TEXT NOT NULL DEFAULT ''"}}.items():
+            for table,fields in {'notices':{'created':'INTEGER NOT NULL DEFAULT 0','notify':'INTEGER NOT NULL DEFAULT 0','delivery_error':"TEXT NOT NULL DEFAULT ''"},'slots':{'kind':"TEXT NOT NULL DEFAULT 'legacy'",'requested_at':'INTEGER NOT NULL DEFAULT 0',
+                                         'search_cancelled':'INTEGER NOT NULL DEFAULT 0','automatic':'INTEGER NOT NULL DEFAULT 0','publish_at':'INTEGER NOT NULL DEFAULT 0'},
+                                 'candidates':{'scheduled_at':'INTEGER','publication_error':"TEXT NOT NULL DEFAULT ''",'auto_queued':'INTEGER NOT NULL DEFAULT 0'}}.items():
                 columns={r['name'] for r in c.execute('PRAGMA table_info('+table+')').fetchall()}
                 for name,definition in fields.items():
                     if name not in columns: c.execute('ALTER TABLE '+table+' ADD COLUMN '+name+' '+definition)
@@ -77,6 +77,11 @@ class Store:
                     cfg = channel_defaults()
                     cfg.update({k: v for k, v in item.items() if k != "name"})
                     c.execute("INSERT INTO channels(name,config) VALUES(?,?)", (item["name"], json.dumps(cfg, ensure_ascii=False)))
+            c.execute("""CREATE TABLE IF NOT EXISTS publication_dispatches(
+                id INTEGER PRIMARY KEY,candidate_id INTEGER NOT NULL,target TEXT NOT NULL,
+                started INTEGER NOT NULL,day TEXT NOT NULL,fingerprint TEXT NOT NULL,title TEXT NOT NULL,
+                body TEXT NOT NULL,event_key TEXT NOT NULL,outcome TEXT NOT NULL)""")
+            c.execute('CREATE INDEX IF NOT EXISTS dispatch_target_time ON publication_dispatches(target,started)')
             # Apply the requested limits to an existing installation once. Later
             # user edits (including disabling discovery) must survive restarts.
             if self.get("fashion_upgrade", 0, c) < 1:
@@ -142,6 +147,23 @@ class Store:
                 self.put('budget_enforced',True,c)
                 self.notice('budget-mode:22','Для «Собрано» внутренний учёт токенов и бюджетные остановки отключены. Остальные каналы используют свои лимиты; режим предупреждений доступен в разделе «Расход».',c)
 
+            if not self.get('autonomy_v24',False,c):
+                for row in c.execute('SELECT id,config FROM channels').fetchall():
+                    cfg=json.loads(row['config'])
+                    cfg['publication_mode']='automatic'
+                    cfg['auto_publish']=True
+                    cfg.setdefault('publish_times',cfg.get('times',['21:00']) if cfg.get('mode') in ('cinema','fashion') else cfg.get('search_times',['09:00','15:00','21:00']))
+                    cfg.setdefault('posts_per_run',1 if cfg.get('mode') in ('cinema','fashion') else 2)
+                    cfg.setdefault('post_gap_minutes',5)
+                    cfg.setdefault('auto_text_fallback',cfg.get('mode')!='fashion')
+                    c.execute('UPDATE channels SET config=? WHERE id=?',(json.dumps(cfg,ensure_ascii=False),row['id']))
+                self.put('independent_publication',True,c)
+                self.put('telegram_notifications',dict(enabled=True,success=True,errors=True,partial=True,since=int(time.time()),min_id=c.execute('SELECT COALESCE(MAX(id),0) FROM notices').fetchone()[0]),c)
+                self.put('autonomy_v24',True,c)
+                if self.get('pause_reason','',c) in ('Процесс остановлен на компьютере.','Процесс остановлен на сервере.') and self.get('model','',c):
+                    self.put('paused',False,c);self.put('pause_reason','',c)
+                self.notice('autonomy:24','Автопилот включён для подключённых каналов: ИИ проверяет новые посты и назначает публикации. Старая очередь сохранена. Управление и пауза — на сайте; результаты и ошибки дублируются в Telegram.',c)
+
     @contextlib.contextmanager
     def tx(self):
         c = sqlite3.connect(self.path, timeout=10, isolation_level=None)
@@ -206,6 +228,8 @@ class Store:
                 c.execute("UPDATE channels SET config=? WHERE id=?", (json.dumps(config, ensure_ascii=False), cid))
             for k, v in fields.items():
                 c.execute(f"UPDATE channels SET {k}=? WHERE id=?", (v, cid))
+            if changed_keys.intersection({'auto_publish','publication_mode','publish_times','posts_per_run','post_gap_minutes','topic','sources','include','exclude','require_photo','auto_text_fallback','mode'}) or ('target' in fields and previous and previous['target']!=fields['target']):
+                c.execute("UPDATE candidates SET state='pending',scheduled_at=NULL,auto_queued=0,publication_error='Настройки изменены. Автопубликация снята.' WHERE auto_queued=1 AND state='approved' AND slot_id IN (SELECT id FROM slots WHERE channel_id=?)",(cid,))
             # Search timing alone never revokes an existing publication.
             if changed_keys-{'auto_search','search_times'} or fields:
                 c.execute("UPDATE candidates SET state='draft' WHERE slot_id IN (SELECT id FROM slots WHERE channel_id=? AND kind='legacy' AND state NOT IN ('sent','publishing','unknown')) AND state IN ('pending','approved')", (cid,))
@@ -219,18 +243,70 @@ class Store:
         if c is None:
             with self.tx() as conn:
                 return self.notice(key, text, conn)
-        c.execute("INSERT OR IGNORE INTO notices(notice_key,text,created) VALUES(?,?,?)", (key, text, int(time.time())))
+        notify=int(key.startswith(('sent:','slot-failed:','batch-result:','auto-held:','auto-result:','publish-error:','halt:','manager-error:','manager-partners:','missed-publication:','budget-warning:','ai-problem:','emergency:')))
+        c.execute("INSERT OR IGNORE INTO notices(notice_key,text,created,notify) VALUES(?,?,?,?)", (key,text,int(time.time()),notify))
+
+    def ai_problem(self,reason,c=None):
+        if c is None:
+            with self.tx() as conn: return self.ai_problem(reason,conn)
+        if not self.get('independent_publication',False,c): return self.halt(reason,c)
+        self.put('ai_problem',reason[:500],c)
+        self.notice('ai-problem:'+local_day(time.time())+':'+hashlib.sha256(reason.encode()).hexdigest()[:12],'⚠️ ИИ: '+reason[:500]+' Уже одобренные публикации продолжаются; поиск повторится в следующем цикле.',c)
 
     def halt(self, reason, c=None):
         if c is None:
             with self.tx() as conn:
                 return self.halt(reason, conn)
+        if self.get('emergency_stop',{},c).get('active'):
+            self.put('paused',True,c);return
         was_paused = self.get("paused", True, c)
         old_reason = self.get("pause_reason", "", c)
         self.put("paused", True, c)
         self.put("pause_reason", reason[:500], c)
         if not was_paused or old_reason != reason[:500]:
             self.notice(f"halt:{int(time.time()*1000)}", "🛑 Аварийная остановка\n" + reason[:500] + "\nНовых запросов к ИИ и публикаций не будет. Проверь «Лимиты» и «Очередь». Возобновление — только твоей кнопкой.", c)
+
+    def emergency_halt(self,reason,post=None,now=None,c=None):
+        if c is None:
+            with self.tx() as conn: return self.emergency_halt(reason,post,now,conn)
+        previous=self.get('emergency_stop',{},c)
+        if previous.get('active'): return previous
+        post=post or {};now=int(time.time() if now is None else now)
+        incident=dict(id=secrets.token_hex(8),active=True,created=now,reason=str(reason)[:500],
+            channel_id=post.get('channel_id'),channel_name=post.get('channel_name',''),post_id=post.get('id',0))
+        self.put('emergency_stop',incident,c)
+        self.put('paused',True,c)
+        message='Аварийная защита: '+incident['reason']
+        self.put('pause_reason',message,c)
+        # Quarantine all remaining work atomically. Never replay a held queue on resume.
+        c.execute("UPDATE candidates SET state='draft',scheduled_at=NULL,auto_queued=0,publication_error=? WHERE state='approved'",(message,))
+        c.execute("UPDATE slots SET state='cancelled',search_cancelled=1,error=? WHERE state IN ('new','preparing','queued')",(message,))
+        entries=self.get('manager_campaigns',[],c)
+        for item in entries:
+            if item.get('state') in ('active','checking'):item.update(state='stopped',reason=message)
+        self.put('manager_campaigns',entries,c)
+        job=self.get('manager_search',{},c)
+        if job.get('state') in ('queued','running'):
+            job.update(state='cancelled',error=message);self.put('manager_search',job,c)
+        self.notice('emergency:'+incident['id'],'🚨 АВАРИЙНАЯ ОСТАНОВКА ВСЕЙ СИСТЕМЫ\n'+
+            str(post.get('channel_name',''))+' · пост #'+str(post.get('id',0))+'\n'+incident['reason']+
+            '\nПоиск, публикации и рассылки остановлены. Очередь снята в черновики. Проверь сайт и возобнови вручную. Уже начатая операция может завершиться.',c)
+        return incident
+
+    def resume_after_review(self,actor=0):
+        with self.tx() as c:
+            incident=self.get('emergency_stop',{},c)
+            if incident.get('active'):
+                if c.execute("SELECT 1 FROM candidates WHERE state IN ('publishing','unknown')").fetchone():
+                    raise ValueError('Сначала дождись отправки или проверь неизвестный результат в календаре.')
+                # Manager may not have been initialized in CLI-only installations.
+                if c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='manager_deliveries'").fetchone() and c.execute("SELECT 1 FROM manager_deliveries WHERE state IN ('sending','unknown')").fetchone():
+                    raise ValueError('Сначала проверь незавершённую отправку менеджера.')
+                incident.update(active=False,reviewed_at=int(time.time()),reviewed_by=actor)
+                self.put('emergency_stop',incident,c)
+                for row in c.execute("SELECT key FROM settings WHERE key LIKE 'quality_streak:%'").fetchall():self.put(row['key'],0,c)
+                self.notice('emergency-reviewed:'+incident['id'],'Аварийная остановка проверена вручную. Старые публикации остаются в черновиках, рассылки остановлены.',c)
+            self.put('paused',False,c);self.put('pause_reason','',c)
 
     def pair_code(self):
         code = secrets.token_hex(4)
@@ -289,6 +365,7 @@ class Store:
 
     def approve(self, pid, now):
         with self.tx() as c:
+            if self.get('emergency_stop',{},c).get('active'): raise ValueError('Аварийная остановка. Сначала проверь систему на сайте.')
             kind=c.execute('SELECT s.kind FROM candidates p JOIN slots s ON s.id=p.slot_id WHERE p.id=?',(pid,)).fetchone()
             if kind and kind['kind']=='batch': raise ValueError('Выбери время публикации этого поста.')
             p = c.execute("""SELECT p.*,s.due,s.state AS ss,s.channel_id,ch.enabled,ch.target,ch.config
@@ -312,48 +389,67 @@ class Store:
             c.execute("UPDATE candidates SET state='approved' WHERE id=?", (pid,))
             c.execute("UPDATE slots SET state='queued',selected=? WHERE id=?", (pid, p["slot_id"]))
 
-    def enqueue_search(self,cid,now=None,automatic=False,label=None):
+    def enqueue_search(self,cid,now=None,automatic=False,label=None,publish_at=0):
         now=int(time.time() if now is None else now)
         with self.tx() as c:
+            if self.get('emergency_stop',{},c).get('active'): raise ValueError('Аварийная остановка. Поиск закрыт до ручной проверки.')
             row=c.execute('SELECT * FROM channels WHERE id=?',(cid,)).fetchone()
             if not row: raise ValueError('Канал не найден.')
             cfg=json.loads(row['config'])
-            if automatic:
-                marker=f'auto-batch:{cid}:{now}'
-                if self.get(marker,False,c): return None
-                self.put(marker,True,c)
+            marker=f'auto-batch:{cid}:{publish_at or now}'
+            if automatic and self.get(marker,False,c): return None
             existing=c.execute("SELECT id FROM slots WHERE channel_id=? AND kind='batch' AND state IN ('new','preparing') ORDER BY id LIMIT 1",(cid,)).fetchone()
-            if existing: return existing['id']
+            if existing: return None if automatic else existing['id']
             labels=sorted(cfg.get('search_times',['09:00','15:00','21:00']))
             if not label:
                 clock=datetime.fromtimestamp(now,TZ).strftime('%H:%M')
                 label=next((s for s in reversed(labels) if s<=clock),labels[0])
-            deadline=now+2400
+            deadline=max(now+2400,int(publish_at)+600)
             while c.execute('SELECT 1 FROM slots WHERE channel_id=? AND due=?',(cid,deadline)).fetchone(): deadline+=1
-            return c.execute("INSERT INTO slots(channel_id,due,label,kind,requested_at,automatic) VALUES(?,?,?,'batch',?,?)",(cid,deadline,label,now,int(automatic))).lastrowid
+            sid=c.execute("INSERT INTO slots(channel_id,due,label,kind,requested_at,automatic,publish_at) VALUES(?,?,?,'batch',?,?,?)",(cid,deadline,label,now,int(automatic),int(publish_at))).lastrowid
+            if automatic: self.put(marker,True,c)
+            return sid
 
     def stop_search(self,cid):
         with self.tx() as c:
             c.execute("UPDATE slots SET state='cancelled',search_cancelled=1,error='Поиск остановлен владельцем' WHERE channel_id=? AND kind='batch' AND state IN ('new','preparing')",(cid,))
 
-    def schedule(self,pid,due,now=None):
+    def schedule(self,pid,due,now=None,automatic=False,allow_text_fallback=False):
         now=time.time() if now is None else now
         if type(due) is not int or not now+10<=due<=now+30*86400:
             raise ValueError('Выбери будущее время в пределах 30 дней.')
         with self.tx() as c:
+            if self.get('emergency_stop',{},c).get('active'): raise ValueError('Аварийная остановка: сначала проверь причину и нажми Продолжить на сайте.')
             p=c.execute('''SELECT p.*,s.kind,s.channel_id,ch.config,ch.enabled,ch.target
                 FROM candidates p JOIN slots s ON s.id=p.slot_id JOIN channels ch ON ch.id=s.channel_id WHERE p.id=?''',(pid,)).fetchone()
-            if not p or p['kind']!='batch' or p['state'] not in ('pending','draft','approved'):
+            if not p or p['state'] not in ('pending','draft','approved'):
                 raise ValueError('Этот пост уже отправлен, отправляется или требует проверки результата.')
             if not p['enabled'] or not p['target']: raise ValueError('Сначала подключи и включи канал.')
             cfg,meta=json.loads(p['config']),json.loads(p['meta'])
-            if cfg['require_photo'] and not p['media']: raise ValueError('Сначала прикрепи и проверь картинку.')
+            if automatic:
+                slot=c.execute('SELECT search_cancelled,state FROM slots WHERE id=?',(p['slot_id'],)).fetchone()
+                if self.get('paused',True,c) or not cfg.get('auto_publish') or self.get('publication_blocked:'+str(p['channel_id']),'',c) or slot['search_cancelled'] or slot['state']=='cancelled' or p['state']!='pending':
+                    raise ValueError('Автопубликация остановлена. Пост остаётся на проверке.')
+                if cfg.get('mode')!='fashion' and not meta.get('sources'): raise ValueError('Нет проверяемых источников для автоматической публикации.')
+                from .editor import review_digest
+                if meta.get('editor_digest')!=review_digest(dict(p,meta=meta)):
+                    raise ValueError('Пост изменён после проверки ИИ. Нужно новое одобрение.')
+                if meta.get('editor_approved') is not True or not meta.get('editor_reason'):
+                    raise ValueError('ИИ не подтвердил редакторскую проверку.')
+            if cfg['require_photo'] and not p['media'] and not ((automatic or allow_text_fallback) and cfg.get('auto_text_fallback') and cfg.get('mode')!='fashion'):
+                raise ValueError('Нет обязательной картинки. Прикрепи фото или разреши текст без фото.')
             if meta.get('demo') or meta.get('unverified'): raise ValueError('Сначала проверь материалы, товары и цены.')
             conflict=c.execute('''SELECT p.id FROM candidates p JOIN slots s ON s.id=p.slot_id
                 WHERE s.channel_id=? AND p.id<>? AND p.state IN ('approved','publishing')
                 AND COALESCE(p.scheduled_at,s.due)=?''',(p['channel_id'],pid,due)).fetchone()
             if conflict: raise ValueError('У канала уже есть пост на это время. Выбери другое время.')
-            c.execute("UPDATE candidates SET scheduled_at=?,state='approved',publication_error='' WHERE id=?",(due,pid))
+            if p['kind']!='batch':
+                deadline=int(now)+2400
+                while c.execute('SELECT 1 FROM slots WHERE channel_id=? AND due=?',(p['channel_id'],deadline)).fetchone(): deadline+=1
+                sid=c.execute("INSERT INTO slots(channel_id,due,label,kind,state) VALUES(?,?,?,'batch','pending')",(p['channel_id'],deadline,datetime.fromtimestamp(due,TZ).strftime('%H:%M'))).lastrowid
+                c.execute('UPDATE candidates SET slot_id=? WHERE id=?',(sid,pid))
+                c.execute("UPDATE slots SET state='pending',selected=NULL WHERE id=? AND selected=?",(p['slot_id'],pid))
+            c.execute("UPDATE candidates SET scheduled_at=?,state='approved',publication_error='',auto_queued=? WHERE id=?",(due,int(automatic),pid))
         return due
 
     def unschedule(self,pid):
@@ -361,7 +457,7 @@ class Store:
             row=c.execute('SELECT p.state,s.kind FROM candidates p JOIN slots s ON s.id=p.slot_id WHERE p.id=?',(pid,)).fetchone()
             if not row or row['kind']!='batch' or row['state'] not in ('pending','draft','approved'):
                 raise ValueError('Эту публикацию уже нельзя снять с очереди.')
-            c.execute("UPDATE candidates SET state='pending',scheduled_at=NULL,publication_error='' WHERE id=?",(pid,))
+            c.execute("UPDATE candidates SET state='pending',scheduled_at=NULL,publication_error='',auto_queued=0 WHERE id=?",(pid,))
 
     def edit_candidate(self, pid, *, body=None, media=None):
         with self.tx() as c:
@@ -372,7 +468,7 @@ class Store:
             if slot['kind']=='batch':
                 if body is not None: c.execute("UPDATE candidates SET body=? WHERE id=?",(body,pid))
                 if media is not None: c.execute("UPDATE candidates SET media=? WHERE id=?",(media,pid))
-                c.execute("UPDATE candidates SET state='pending',scheduled_at=NULL,publication_error='' WHERE id=?",(pid,))
+                c.execute("UPDATE candidates SET state='pending',scheduled_at=NULL,publication_error='',auto_queued=0 WHERE id=?",(pid,))
                 return
             if slot["state"] not in ("pending", "queued"):
                 raise ValueError("Эта заявка закрыта.")
@@ -385,6 +481,7 @@ class Store:
 
     def recover(self):
         with self.tx() as c:
+            c.execute("UPDATE publication_dispatches SET outcome='unknown' WHERE outcome='sending'")
             unknown = c.execute("SELECT count(*) FROM ledger WHERE state='reserved'").fetchone()[0]
             c.execute("UPDATE ledger SET state='uncertain',charged=reserved,error='Перезапуск во время запроса' WHERE state='reserved'")
             sending = c.execute("SELECT count(*) FROM slots WHERE state='publishing'").fetchone()[0]
@@ -392,5 +489,10 @@ class Store:
             c.execute("UPDATE slots SET state='unknown',error='Перезапуск во время отправки; проверь канал' WHERE state='publishing'")
             c.execute("UPDATE candidates SET state='unknown' WHERE state='publishing'")
             c.execute("UPDATE slots SET state='failed',error='Подготовка прервана; без автоматического повтора' WHERE state='preparing'")
-            if unknown or sending or sending_posts:
+            if self.get('independent_publication',False,c):
+                for row in c.execute("SELECT DISTINCT s.channel_id FROM candidates p JOIN slots s ON s.id=p.slot_id WHERE p.state='unknown'").fetchall():
+                    self.put('publication_blocked:'+str(row['channel_id']),'Результат прежней отправки неизвестен. Проверь канал.',c)
+                c.execute("UPDATE notices SET delivered=2,delivery_error='Перезапуск во время уведомления; повтор не отправляется' WHERE delivered=-1")
+                if unknown: self.ai_problem('Перезапуск во время запроса ИИ. Резерв расхода сохранён.',c)
+            elif unknown or sending or sending_posts:
                 self.halt(f"После перезапуска: незавершённых запросов ИИ — {unknown}, отправок с неизвестным результатом — {sending+sending_posts}. Они не будут повторены.", c)

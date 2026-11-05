@@ -1,32 +1,47 @@
-Студия / SMM Manager 2.3.0
+Студия / SMM Manager 2.4.1
 
-237 tests passed.
-Tests: python -m unittest discover -s tests -t . -q
-Coverage: owner/coowner authorization, one-time web login, CSRF/Origin checks,
-session revocation, persistent migration, post scheduling and recovery,
-manager campaign serialization, and source/fashion processing.
+291 tests passed (Python 3.12, isolated dependencies).
+Command: python -m unittest discover -s tests -t . -q
 
-New tests: merge source presets once without replacing user settings; preserve
-user removals on restart; recognize football channels; read and shortlist the
-seventh feed; bypass fashion ledger and all token budgets; preserve manual Stop;
-warning mode with unknown usage; private source health/presets API state; budget
-mode validation and preservation of counters/settings.
+Coverage: automatic find -> editorial review -> queue -> mock publication;
+one AI request for a complete news batch; one/two posts per run; schedule
+lead window, delayed startup, midnight and restart deduplication; short outage
+catch-up and old backlog holding; rejected AI decisions; concurrent edit
+invalidation; stop during generation; disabling auto while retaining manual
+schedule; per-channel unknown-send isolation; definitive Telegram refusal;
+AI budget exhaustion does not stop ready publication; missing image fallback;
+definitive photo rejection text fallback; no fallback after ambiguous send.
 
-Browser QA uses isolated fixture data, no live account credentials or messages.
-Checked: content-first start page, list/gallery, source presets without duplicate
-URLs and saving channel settings, More navigation, budget form, mobile layout.
+Owner-only event summaries, duplicate prevention, delivery uncertainty,
+categories and disabled notifications; migration persistence; one-click web
+approval and mock publisher send; notification/channel configuration validation;
+reconnect clears permission block; old post conversion to independent scheduling.
 
-RSS checks: several feeds parsed successfully from this environment; some
-publishers returned access errors. Runtime source diagnostics expose failures.
-Real Bothost deployment, real account sends, real marketplace completion and
-physical-device PWA installation were not tested here.
-No QA launcher, demo database, auth credentials or sessions in the release.
+Existing authorization, login/CSRF, coowner/session revocation, data migration,
+source presets and reading, fashion verification/budget bypass, manager
+serialization, manual scheduling and recovery regressions passed.
+Legacy fixtures explicitly retain manual mode; autonomy has dedicated tests.
 
-2.3 coverage: Telegram access gateway grants a code only in an authorized private
-chat; historical admin callbacks/forms cannot mutate state; setup pairing and
-recipient-bound expiring coowner invitations continue to work. Runtime test
-starts the publisher while pending notices are never pushed to Telegram.
-Web notification history requires login; read cursor is per actor, CSRF guarded,
-and cannot mark future events as read. Legacy notice rows keep unknown dates.
-Browser checked notification count, mark-all and reload persistence, mobile
-width/navigation. No live Telegram Bot API operations were performed.
+Browser QA with isolated local fixtures and mocked integrations:
+web approval assigns an actual time shown in preview/calendar; channel gap
+saves; Telegram category settings survive reload. Mobile feed and channel
+form fit 390px iframe, no horizontal overflow (383/383 and 390/390).
+JavaScript syntax and Python compilation checked. Screenshot uses test data.
+
+No live Telegram messages, AI calls or Bothost deployment were performed.
+Real source availability, marketplace completion, account connectivity and
+physical-device PWA installation are outside these mocked checks.
+Release excludes QA launchers/dependencies, databases, credentials and sessions.
+
+2.4.1 safety coverage (28 added tests): pre-send burst and daily ceilings,
+day rollover, separate destinations and shared destination across profiles,
+exact/near duplicate and tracking URL normalization, older confirmed sends,
+obvious garbage/templates, modified automatic posts, editorial failure streak,
+persistent incident and counters after restart, budget bypass cannot bypass
+incident, global queue quarantine and campaign/search stopping, blocked new
+approvals/searches, manual recovery without queue replay, unknown send checks,
+muted normal notifications with critical priority, atomic notification claiming,
+parallel publishers cannot exceed burst threshold, fail-closed publisher loop,
+preserving the original reason, authenticated/CSRF guarded manual web reset,
+unknown-send resolution and crash recovery of immutable dispatch audit.
+All tests use mocked integrations. No live Telegram sends or Bothost deployment.

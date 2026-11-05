@@ -29,7 +29,7 @@ class WebTests(unittest.TestCase):
         return self.s.add_candidates(sid,[dict(title='Пост',body='Текст проверенного поста'),dict(title='Второй',body='Другой проверенный пост')],time.time())
     def test_public_shell_private_data(self):
         with self.c.get('/') as r:self.assertEqual(r.status_code,200)
-        self.assertEqual(self.c.get('/healthz').json['version'],'2.3.0')
+        self.assertEqual(self.c.get('/healthz').json['version'],'2.4.1')
         self.assertEqual(self.c.get('/api/state').status_code,401)
         with self.c.get('/assets/app.js') as r:self.assertEqual(r.status_code,200)
     def test_code_single_use_and_cookie(self):
@@ -89,6 +89,41 @@ class WebTests(unittest.TestCase):
         self.login();self.assertEqual(self.post('/api/limits',{'daily_tokens':400000}).status_code,200)
         self.assertEqual(self.post('/api/limits',{'fashion_steps':99}).status_code,400)
         self.assertEqual(self.s.get('limits')['daily_tokens'],400000)
+
+    def test_one_click_approval_assigns_time_and_reaches_publisher(self):
+        self.login();a,b=self.candidates();self.s.put('paused',False)
+        self.tg.publish.return_value={'message_id':123}
+        self.assertEqual(self.post(f'/api/posts/{a}',{'action':'approve'}).status_code,200)
+        p=self.s.candidate(a)
+        self.assertEqual(p['state'],'approved');self.assertIsNotNone(p['scheduled_at'])
+        self.engine.publish(p['scheduled_at'])
+        self.assertEqual(self.s.candidate(a)['state'],'sent')
+        self.assertEqual(self.s.candidate(b)['state'],'pending')
+
+    def test_auto_settings_and_notification_preferences_are_validated(self):
+        self.login()
+        result=self.post('/api/channels/1',{'config':{'auto_publish':True,'publish_times':'10:00 18:00','posts_per_run':1,'post_gap_minutes':7,'auto_text_fallback':True}})
+        self.assertEqual(result.status_code,200,result.json)
+        self.assertEqual(self.s.channel(1)['config']['publish_times'],['10:00','18:00'])
+        self.assertEqual(self.post('/api/channels/1',{'config':{'posts_per_run':9}}).status_code,400)
+        self.assertEqual(self.post('/api/notification-settings',{'enabled':False}).status_code,200)
+        self.assertEqual(self.post('/api/notification-settings',{'enabled':'yes'}).status_code,400)
+        self.assertEqual(self.post('/api/notification-settings',{'enabled':True}).status_code,200)
+        self.assertIn('min_id',self.s.get('telegram_notifications'))
+
+    def test_reconnecting_channel_clears_its_permission_block(self):
+        self.login();self.s.put('publication_blocked:1','No rights')
+        self.assertEqual(self.post('/api/channels/1',{'action':'connect','target':'-100123456'}).status_code,200)
+        self.assertEqual(self.s.get('publication_blocked:1'),'')
+
+    def test_legacy_post_can_be_scheduled_from_web_without_telegram_controls(self):
+        self.login();ch=self.s.channel(1);cfg=ch['config'];cfg['require_photo']=False
+        self.s.update_channel(1,config=cfg,enabled=True,target='-100123456')
+        sid=self.s.execute("INSERT INTO slots(channel_id,due,label,state) VALUES(?,?,?,'preparing')",(1,int(time.time())+2400,'09:00'))
+        pid=self.s.add_candidates(sid,[dict(title='Legacy',body='Verified old post')],time.time())[0]
+        self.assertEqual(self.post(f'/api/posts/{pid}',{'action':'approve'}).status_code,200)
+        self.assertEqual(self.s.candidate(pid)['batch_kind'],'batch')
+        self.assertEqual(self.s.candidate(pid)['state'],'approved')
 
     def test_notices_private_and_read_cursor_is_per_actor(self):
         self.s.notice('test-event','Saved for the web only')
@@ -182,3 +217,33 @@ class WebTests(unittest.TestCase):
             for i in range(310):
                 c.execute("INSERT INTO candidates(slot_id,title,body,meta,state,created) VALUES(?,?,?,?,?,?)",(old['slot_id'],'Recent '+str(i),'Текст','{}','draft',int(time.time())))
         ids={p['id'] for p in self.c.get('/api/state').json['posts']};self.assertIn(pid,ids)
+
+    def test_emergency_visible_and_reset_only_by_authorized_manual_action(self):
+        self.login();a,b=self.candidates()
+        self.s.schedule(a,int(time.time())+600)
+        self.s.emergency_halt('Слишком много публикаций',post=dict(channel_id=1,channel_name='Test',id=a))
+        state=self.c.get('/api/state').json
+        self.assertTrue(state['emergency']['active']);self.assertTrue(state['paused'])
+        self.assertEqual(self.post('/api/posts/'+str(b),{'action':'approve'}).status_code,400)
+        self.assertEqual(self.app.test_client().post('/api/control',json={'action':'resume'},headers={'X-SMM-Web':'1'}).status_code,401)
+        r=self.post('/api/control',{'action':'resume'});self.assertEqual(r.status_code,200,r.json)
+        self.assertFalse(self.s.get('emergency_stop')['active'])
+        self.assertEqual(self.s.get('emergency_stop')['reviewed_by'],12345)
+        self.assertEqual(self.s.candidate(a)['state'],'draft')
+
+    def test_resolving_unknown_not_sent_releases_duplicate_guard_only_after_review(self):
+        self.login();a,b=self.candidates();now=int(time.time())
+        self.s.put('paused',False);self.s.schedule(a,now+60,now)
+        self.tg.publish.side_effect=TimeoutError()
+        self.engine.publish(now+60)
+        self.assertEqual(self.s.candidate(a)['state'],'unknown')
+        self.s.emergency_halt('Проверка аварии')
+        self.assertEqual(self.post('/api/control',{'action':'resume'}).status_code,400)
+        r=self.post('/api/posts/'+str(a),{'action':'resolve','sent':False})
+        self.assertEqual(r.status_code,200,r.json)
+        self.assertEqual(self.s.rows('SELECT outcome FROM publication_dispatches')[0]['outcome'],'not_sent')
+        self.assertEqual(self.post('/api/control',{'action':'resume'}).status_code,200)
+        self.s.schedule(a,now+3600,now)
+        self.tg.publish.side_effect=None;self.tg.publish.return_value={'message_id':777}
+        self.engine.publish(now+3600)
+        self.assertEqual(self.s.candidate(a)['state'],'sent')

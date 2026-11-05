@@ -101,6 +101,7 @@ class WebAccessTests(unittest.TestCase):
         publisher_started=threading.Event()
         engine.loop.side_effect=lambda: engine.shutdown.wait(.01)
         engine.publisher_loop.side_effect=lambda: publisher_started.set()
+        self.store.put('telegram_notifications',dict(enabled=False,since=0))
         self.store.notice('waiting-notice','Do not send this to Telegram')
         self.store.put('paused',False)
         def poll(*args):

@@ -112,6 +112,7 @@ class Manager:
     def start(self, cid):
         now = int(self.clock())
         def update(item,c):
+            if self.store.get('emergency_stop',{},c).get('active'): raise ValueError('Аварийная остановка. Сначала проверь систему на сайте.')
             account=self.store.get('manager_account', {}, c)
             if not account.get('connected'):
                 raise ValueError('Сначала подключи аккаунт в разделе «Подключение аккаунта».')
@@ -189,6 +190,7 @@ class Manager:
             self.store.put('manager_next_send',now+120,c)
 
     def tick(self):
+        if self.store.get('emergency_stop',{}).get('active'): return
         now=int(self.clock())
         if not self.store.get('manager_account',{}).get('connected'): return
         if self.store.get('manager_cooldown',0)>now: return
@@ -232,6 +234,7 @@ class Manager:
 
     def deliver(self, snapshot, now):
         with self.store.tx() as c:
+            if self.store.get('emergency_stop',{},c).get('active'): return
             entries=self.entries(c)
             item=next((x for x in entries if x['id']==snapshot['id']),None)
             if not item or item['state']!='active' or item['next_at']>now: return
@@ -259,7 +262,7 @@ class Manager:
             self.store.put('manager_group_next:'+peer['key'],now+item['cycle_minutes']*60,c)
         # No database lock is held during Telegram calls: Stop remains responsive.
         current=self.campaign(item['id'])
-        if current['state']!='active' or current['version']!=item['version']:
+        if self.store.get('emergency_stop',{}).get('active') or current['state']!='active' or current['version']!=item['version']:
             with self.store.tx() as c:
                 c.execute("UPDATE manager_deliveries SET state='cancelled' WHERE id=?",(delivery,))
                 self.store.put('manager_group_next:'+peer['key'],group_next,c)
@@ -279,8 +282,10 @@ class Manager:
             self.store.put('manager_next_send',completed+item['gap_minutes']*60,c)
 
     def queue_search(self):
+        if self.store.get('emergency_stop',{}).get('active'): raise ValueError('Аварийная остановка. Сначала проверь систему на сайте.')
         now=int(self.clock())
         with self.store.tx() as c:
+            if self.store.get('emergency_stop',{},c).get('active'): raise ValueError('Аварийная остановка. Поиск закрыт до ручной проверки.')
             if not self.store.get('manager_account',{},c).get('connected'): raise ValueError('Сначала подключи аккаунт Telegram.')
             job=self.store.get('manager_search',{},c)
             if job.get('state') in ('queued','running'): raise ValueError('Поиск уже идёт. Дождись результатов.')
@@ -294,6 +299,7 @@ class Manager:
         return job
 
     def search_tick(self):
+        if self.store.get('emergency_stop',{}).get('active'): return
         job=self.store.get('manager_search',{})
         if job.get('state')!='queued': return
         job['state']='running'

@@ -75,7 +75,7 @@ def channel_defaults() -> dict:
         max_age_hours=24, sources=[], include=[], exclude=[],
         style="Русский язык. Живой, понятный, спокойный стиль. Короткие абзацы, без кликбейта и штампов. Не более 650 знаков основного текста.",
         require_photo=True, budgets={}, web_search=False,
-        publication_mode='manual_time',auto_search=True,search_times=['09:00','15:00','21:00'],
+        publication_mode='automatic',auto_publish=True,auto_search=True,search_times=['09:00','15:00','21:00'],publish_times=['09:00','15:00','21:00'],posts_per_run=2,post_gap_minutes=5,auto_text_fallback=True,
     )
 
 

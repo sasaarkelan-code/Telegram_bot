@@ -211,13 +211,15 @@ def create_app(root, store, engine, auth, telegram, manager=None, env=None):
         channels = store.channels()
         notice_read = store.get('web_notice_read:'+str(g.actor),0)
         return jsonify(version=__version__, actor=g.actor, username=store.get('web_username:'+str(g.actor),''), csrf=g.csrf, now=int(time.time()), timezone='Europe/Moscow',
-            notices=store.rows('SELECT id,text,created FROM notices ORDER BY id DESC LIMIT 100'),
+            notices=store.rows('SELECT id,text,created,delivery_error FROM notices ORDER BY id DESC LIMIT 100'),
             notice_read=notice_read, notice_unread=store.rows('SELECT COUNT(*) AS n FROM notices WHERE id>?',(notice_read,))[0]['n'],
-            paused=store.get('paused', True), pause_reason=store.get('pause_reason', ''),
+            paused=store.get('paused', True), pause_reason=store.get('pause_reason', ''), emergency=store.get('emergency_stop',{}),
             model=store.get('model',''), models=store.get('model_catalog',[]), ai_connected=auth.saved(),
             channels=channels, posts=posts, searches=store.rows("SELECT id,channel_id,state,error,requested_at FROM slots WHERE kind='batch' ORDER BY id DESC LIMIT 60"),
             usage=Budget(store).usage(), limits=store.get('limits'), budget_enforced=store.get('budget_enforced',True), fashion_unmetered=store.get('fashion_unmetered',True),
             source_health=store.rows('SELECT url,checked,error FROM feed_cache'), source_presets=PRESETS,
+            automation_status=[dict(channel_id=c['id'],blocked=store.get('publication_blocked:'+str(c['id']),'')) for c in channels],
+            ai_problem=store.get('ai_problem',''),telegram_notifications=store.get('telegram_notifications',{}),
             campaigns=manager.entries(), account=store.get('manager_account',{}), cooldown=store.get('manager_cooldown',0),
             deliveries=store.rows('SELECT id,campaign,target,started,completed,state,error FROM manager_deliveries ORDER BY id DESC LIMIT 100'),
             partners=store.rows('SELECT * FROM manager_channels ORDER BY favorite DESC,found DESC LIMIT 300'),
@@ -234,6 +236,18 @@ def create_app(root, store, engine, auth, telegram, manager=None, env=None):
             store.put(key,max(store.get(key,0,c),min(until,latest)),c)
         return jsonify(ok=True)
 
+    @app.post('/api/notification-settings')
+    def notification_settings():
+        incoming=data();allowed={'enabled','success','errors','partial'}
+        if not incoming or set(incoming)-allowed or any(type(v) is not bool for v in incoming.values()): raise ValueError('Нужны переключатели уведомлений.')
+        current=store.get('telegram_notifications',{})
+        if incoming.get('enabled') is True and not current.get('enabled'):
+            current['since']=int(time.time())
+            current['min_id']=store.rows('SELECT COALESCE(MAX(id),0) AS id FROM notices')[0]['id']
+        current.update(incoming);store.put('telegram_notifications',current)
+        audit('Изменены уведомления Telegram')
+        return jsonify(ok=True)
+
     @app.post('/api/control')
     def control():
         action = data().get('action')
@@ -242,9 +256,9 @@ def create_app(root, store, engine, auth, telegram, manager=None, env=None):
             if action == 'stop_all': manager.stop()
         elif action == 'resume':
             if not store.get('model') or not auth.saved(): raise ValueError('Сначала подключи ИИ на сервере и выбери модель в настройках.')
-            if store.rows("SELECT id FROM slots WHERE state='unknown'") or store.rows("SELECT id FROM candidates WHERE state='unknown'"):
+            if not store.get('independent_publication',False) and (store.rows("SELECT id FROM slots WHERE state='unknown'") or store.rows("SELECT id FROM candidates WHERE state='unknown'")):
                 raise ValueError('Проверь публикации с неизвестным результатом в календаре.')
-            store.put('paused',False); store.put('pause_reason',''); engine.wake.set()
+            store.resume_after_review(g.actor); engine.wake.set()
         else: raise ValueError('Неизвестное действие.')
         audit('СММ: '+action)
         return jsonify(ok=True)
@@ -271,6 +285,8 @@ def create_app(root, store, engine, auth, telegram, manager=None, env=None):
             if not re.fullmatch(r'(?:@[A-Za-z][A-Za-z0-9_]{3,31}|-100\d{5,18})',target): raise ValueError('Укажи @имя_канала или числовой ID -100…')
             checked=telegram.connect_channel(target)
             store.update_channel(cid,target=checked)
+            store.put('publication_blocked:'+str(cid),'')
+            engine.wake.set()
         elif action=='save':
             cfg=dict(ch['config']); fields={}
             if 'name' in d:
@@ -283,17 +299,19 @@ def create_app(root, store, engine, auth, telegram, manager=None, env=None):
                 fields['enabled']=int(d['enabled'])
             incoming=d.get('config',{})
             if not isinstance(incoming,dict): raise ValueError('Некорректные настройки.')
-            allowed={'topic','style','sources','include','exclude','mode','max_age_hours','auto_search','search_times','require_photo','web_search','budgets'}
+            allowed={'topic','style','sources','include','exclude','mode','max_age_hours','auto_search','search_times','require_photo','web_search','budgets','auto_publish','publish_times','posts_per_run','post_gap_minutes','auto_text_fallback'}
             if set(incoming)-allowed: raise ValueError('Неизвестная настройка канала.')
             for key,value in incoming.items():
-                if key in ('auto_search','require_photo','web_search'):
+                if key in ('auto_search','require_photo','web_search','auto_publish','auto_text_fallback'):
                     if type(value) is not bool: raise ValueError('Нужен переключатель.')
-                elif key=='search_times':
+                elif key in ('search_times','publish_times'):
                     value=parse_times(' '.join(value) if isinstance(value,list) else str(value))
-                    if len(value)!=3: raise ValueError('Укажи три времени автоподбора, например 09:00 15:00 21:00.')
+                    if key=='search_times' and len(value)!=3: raise ValueError('Укажи три времени автоподбора, например 09:00 15:00 21:00.')
                 elif key=='mode':
                     if value not in ('news','fashion','cinema'): raise ValueError('Неизвестный режим.')
                 elif key=='max_age_hours': value=number(value,1,720)
+                elif key=='posts_per_run': value=number(value,1,2)
+                elif key=='post_gap_minutes': value=number(value,1,60)
                 elif key in ('sources','include','exclude'):
                     if not isinstance(value,list) or len(value)>30 or any(not isinstance(x,str) or len(x)>500 for x in value): raise ValueError('До 30 строк, до 500 знаков каждая.')
                     value=[x.strip() for x in value if x.strip()]
@@ -314,6 +332,10 @@ def create_app(root, store, engine, auth, telegram, manager=None, env=None):
         if action=='schedule':
             due=publication_time(str(d.get('time','')).replace('T',' '),time.time())
             store.schedule(pid,due)
+        elif action=='approve':
+            from .automation import AutoPublisher
+            due=AutoPublisher(store).choose_time(p,time.time())
+            store.schedule(pid,due,allow_text_fallback=True)
         elif action=='unschedule': store.unschedule(pid)
         elif action=='edit':
             body=d.get('body',p['body']); media=d.get('media',p['media'])
@@ -327,7 +349,7 @@ def create_app(root, store, engine, auth, telegram, manager=None, env=None):
             store.edit_candidate(pid,body=body,media=media)
         elif action in ('draft','reject'):
             with store.tx() as c:
-                changed=c.execute("UPDATE candidates SET state=?,scheduled_at=NULL WHERE id=? AND state IN ('pending','draft','approved')",('draft' if action=='draft' else 'rejected',pid)).rowcount
+                changed=c.execute("UPDATE candidates SET state=?,scheduled_at=NULL,auto_queued=0 WHERE id=? AND state IN ('pending','draft','approved')",('draft' if action=='draft' else 'rejected',pid)).rowcount
                 if not changed: raise ValueError('Пост уже отправляется или обработан.')
                 if p['batch_kind']=='legacy': c.execute("UPDATE slots SET state='pending',selected=NULL WHERE id=? AND selected=?",(p['slot_id'],pid))
         elif action=='verified':
@@ -344,7 +366,9 @@ def create_app(root, store, engine, auth, telegram, manager=None, env=None):
             with store.tx() as c:
                 changed=c.execute("UPDATE candidates SET state=?,scheduled_at=CASE WHEN ? THEN scheduled_at ELSE NULL END WHERE id=? AND state='unknown'",('sent' if sent else 'draft',sent,pid)).rowcount
                 if not changed: raise ValueError('Нет неопределённой отправки.')
+                c.execute("UPDATE publication_dispatches SET outcome=? WHERE candidate_id=? AND outcome='unknown'",('sent' if sent else 'not_sent',pid))
                 if p['batch_kind']=='legacy': c.execute('UPDATE slots SET state=? WHERE id=?',('sent' if sent else 'expired',p['slot_id']))
+                if not c.execute("SELECT 1 FROM candidates p JOIN slots s ON s.id=p.slot_id WHERE s.channel_id=? AND p.state='unknown'",(p['channel_id'],)).fetchone(): store.put('publication_blocked:'+str(p['channel_id']),'',c)
         else: raise ValueError('Неизвестное действие.')
         audit('Пост #'+str(pid)+': '+action)
         return jsonify(ok=True)

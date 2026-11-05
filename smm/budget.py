@@ -32,7 +32,7 @@ class Budget:
         with self.store.tx() as c:
             limits = self.store.get("limits", {}, c)
             enforced = self.store.get("budget_enforced", True, c)
-            if self.store.get("paused", True, c):
+            if self.store.get("paused", True, c) or self.store.get("emergency_stop",{},c).get("active"):
                 raise BudgetStop("Бот на паузе.")
             channel_cfg=c.execute('SELECT config FROM channels WHERE id=?',(channel_id,)).fetchone()
             fashion=bool(channel_cfg and json.loads(channel_cfg['config']).get('mode')=='fashion')
@@ -61,7 +61,7 @@ class Budget:
             ]
             error = next((msg for condition, msg in checks if condition), None) if enforced else None
             if error:
-                self.store.halt(error, c)
+                self.store.ai_problem(error, c)
             else:
                 cur = c.execute("INSERT INTO ledger(channel_id,slot_id,started,day,reserved) VALUES(?,?,?,?,?)",
                                 (channel_id, slot_id, int(now), local_day(now), limits["request_reserve"]))
@@ -80,7 +80,7 @@ class Budget:
             if not valid:
                 c.execute("UPDATE ledger SET charged=reserved,state='uncertain',error=? WHERE id=?", ((error or "Нет достоверного usage")[:200], rid))
                 if self.store.get("budget_enforced",True,c):
-                    self.store.halt("Расход последнего запроса неизвестен. Резерв сохранён, новые операции остановлены.", c)
+                    self.store.ai_problem("Расход последнего запроса неизвестен. Резерв сохранён, новые операции остановлены.", c)
                 else:
                     self.store.notice("usage-unknown:"+str(rid),"Расход запроса неизвестен: в журнале оставлен резерв. Режим предупреждений, студия продолжает работать.",c)
                 return
@@ -99,10 +99,10 @@ class Budget:
                     self.store.put('fashion_spend_closed:'+str(row['slot_id']),True,c)
                     self.store.notice('fashion-spend:'+str(row['slot_id']),'🧥 Подборка одежды достигла ожидаемого расхода. Новые запросы по ней закрыты; полученный полный образ сохранится. Фактический расход учтён, другие каналы работают в своих общих лимитах.',c)
             if enforced and (u["tokens"] >= limits["daily_tokens"] or u["rolling"] >= limits["rolling_tokens"]):
-                self.store.halt("Достигнут предел токенов.", c)
+                self.store.ai_problem("Достигнут предел токенов.", c)
             elif enforced and total > row["reserved"] and not fashion:
-                self.store.halt("Один запрос превысил свой резерв токенов. Новые операции остановлены.", c)
+                self.store.ai_problem("Один запрос превысил свой резерв токенов. Новые операции остановлены.", c)
             elif enforced and self.store.get("ai_errors", 0, c) >= 2:
-                self.store.halt("Два подряд ошибочных ответа ИИ. Автоматических исправлений и повторов нет.", c)
+                self.store.ai_problem("Два подряд ошибочных ответа ИИ. Автоматических исправлений и повторов нет.", c)
             elif u["tokens"] >= limits["daily_tokens"] * .8:
                 self.store.notice("budget-warning:"+local_day(now), f"⚠️ Использовано {u['tokens']} из {limits['daily_tokens']} токенов дневного бюджета бота. Это журнал бота, а не остаток всей подписки.", c)

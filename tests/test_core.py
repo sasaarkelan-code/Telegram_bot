@@ -59,6 +59,11 @@ class Base(unittest.TestCase):
         self.store.put("paused", False)
         self.store.put("budget_enforced", True)
         self.store.put("fashion_unmetered", False)
+        self.store.put('independent_publication',False)
+        self.store.put('telegram_notifications',dict(enabled=False,since=0))
+        for ch in self.store.channels():
+            cfg=ch['config'];cfg.update(publication_mode='manual_time',auto_publish=False,auto_text_fallback=False)
+            self.store.update_channel(ch['id'],config=cfg)
         self.store.put("model", "test-model")
         self.now = int(time.time())
         self.tg = FakeTelegram()

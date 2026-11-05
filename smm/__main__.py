@@ -130,9 +130,13 @@ def run(root, store):
         publisher.start()
         account_worker=threading.Thread(target=manager.loop,args=(engine.shutdown,),daemon=True)
         account_worker.start()
-        print("SMM Manager", __version__, "запущен. Управление и уведомления — только на сайте. Telegram — ключ для входа.")
+        from .notifications import EventNotifications
+        events=EventNotifications(store,telegram)
+        notifier=threading.Thread(target=events.loop,args=(engine.shutdown,),daemon=True)
+        notifier.start()
+        print("SMM Manager", __version__, "запущен. Автопилот работает по расписанию. Управление — на сайте; события — на сайте и в Telegram.")
         print("Это окно нужно оставить открытым. Ctrl+C — остановка.")
-        print("Автоподбор до двух постов трижды в день. Время публикации каждому посту назначает владелец, МСК.")
+        print("ИИ ищет и проверяет посты перед временем публикации; автопубликация и уведомления настраиваются на сайте, МСК.")
         if not store.get("owner", 0):
             print("Владелец ещё не привязан. Отправь боту /start с кодом настройки.")
         import signal
@@ -157,10 +161,13 @@ def run(root, store):
                     time.sleep(2)
         except KeyboardInterrupt:
             manager.stop(reason='Процесс остановлен владельцем.')
-            store.halt("Процесс остановлен на компьютере.")
+            # A deployment restart must not persist an accidental manual pause.
+            # Explicit pauses and uncertain deliveries are stored separately.
             engine.shutdown.set()
             engine.wake.set()
             scheduler.join(timeout=3)
+            publisher.join(timeout=3)
+            notifier.join(timeout=3)
             if web_server: web_server.close()
             print("\nОстановлено. Счётчики и очередь сохранены.")
 

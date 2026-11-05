@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import hashlib
 import json
 import re
 import time
@@ -14,6 +15,13 @@ REQUIRED = {"outerwear", "top", "bottom", "shoes", "hat", "bag"}
 CATEGORIES = REQUIRED | {"scarf", "gloves", "accessory"}
 LABELS = dict(outerwear="Куртка", top="Верх", bottom="Брюки", shoes="Обувь", hat="Шапка",
               bag="Сумка", scarf="Шарф", gloves="Перчатки", accessory="Аксессуар")
+
+
+def review_digest(post):
+    meta=post.get('meta',{})
+    value={k:post.get(k,'') for k in ('title','body','media','event_key')}
+    value['sources']=meta.get('sources',[]);value['products']=meta.get('products',[])
+    return hashlib.sha256(json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()
 
 
 def utf16(text):
@@ -154,7 +162,7 @@ def news_options(result, articles, previous, config, now):
         refs = [{"url": known[i]["url"], "title": known[i]["title"], "published": known[i]["published"]} for i in ids[:3]]
         media = next((known[i]["image"] for i in ids if known[i]["image"]), "")
         p = dict(title=title, body=text, media=media, event_key=event, article_ids=ids,
-                 meta={"sources": refs, "mode": config["mode"], "checked_at": int(now)})
+                 meta={"sources": refs, "mode": config["mode"], "checked_at": int(now),"editor_approved": raw.get("approved") is True, "editor_reason": plain(str(raw.get("review_reason", "")))[:350]})
         if utf16(render(p)) > 1000:
             continue
         options.append(p)
