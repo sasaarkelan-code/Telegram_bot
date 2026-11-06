@@ -29,7 +29,7 @@ class WebTests(unittest.TestCase):
         return self.s.add_candidates(sid,[dict(title='Пост',body='Текст проверенного поста'),dict(title='Второй',body='Другой проверенный пост')],time.time())
     def test_public_shell_private_data(self):
         with self.c.get('/') as r:self.assertEqual(r.status_code,200)
-        self.assertEqual(self.c.get('/healthz').json['version'],'2.5.0')
+        self.assertEqual(self.c.get('/healthz').json['version'],'2.6.0')
         self.assertEqual(self.c.get('/api/state').status_code,401)
         with self.c.get('/assets/app.js') as r:self.assertEqual(r.status_code,200)
     def test_code_single_use_and_cookie(self):
@@ -262,3 +262,11 @@ class WebTests(unittest.TestCase):
         self.assertEqual(self.c.get('/api/analytics').status_code,401)
         self.login();self.assertEqual(self.c.get('/api/analytics?days=7').status_code,200)
         self.assertEqual(self.c.get('/api/analytics?days=999').status_code,400)
+
+    def test_redesign_assets_and_restore_rejection(self):
+        with self.c.get('/assets/aurel.css') as r:self.assertEqual(r.status_code,200)
+        self.login();a,b=self.candidates()
+        self.assertEqual(self.post('/api/posts/'+str(a),{'action':'reject'}).status_code,200)
+        self.assertEqual(self.post('/api/posts/'+str(a),{'action':'restore'}).status_code,200)
+        self.assertEqual(self.s.candidate(a)['state'],'pending')
+        self.assertIsNone(self.s.candidate(a)['scheduled_at'])

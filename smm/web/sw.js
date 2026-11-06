@@ -1,6 +1,6 @@
 // Only public presentation assets can be cached. API, images and account data: network only.
-const CACHE='studio-public-v2.5.0';
-const ASSETS=['/assets/app.js','/assets/theme-init.js','/assets/style.css','/assets/icon.svg','/assets/icon-192.png','/assets/icon-512.png'];
+const CACHE='studio-public-v2.6.0';
+const ASSETS=['/assets/app.js','/assets/theme-init.js','/assets/style.css','/assets/aurel.css','/assets/icon.svg','/assets/icon-192.png','/assets/icon-512.png'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS))));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('studio-public-')&&k!==CACHE).map(k=>caches.delete(k))))));
 self.addEventListener('fetch',event=>{

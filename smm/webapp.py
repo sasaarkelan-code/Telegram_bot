@@ -145,7 +145,7 @@ def create_app(root, store, engine, auth, telegram, manager=None, env=None):
 
     @app.get('/assets/<name>')
     def asset(name):
-        if name not in ('app.js', 'style.css', 'icon.svg','icon-192.png','icon-512.png','theme-init.js'): return '', 404
+        if name not in ('app.js', 'style.css','aurel.css', 'icon.svg','icon-192.png','icon-512.png','theme-init.js'): return '', 404
         return send_file(assets / name)
 
     @app.get('/manifest.webmanifest')
@@ -369,6 +369,10 @@ def create_app(root, store, engine, auth, telegram, manager=None, env=None):
             check=dict(p,body=body,media=media)
             if utf16(render(check))>1000: raise ValueError('Подпись вместе со ссылками слишком длинная; сократи текст.')
             store.edit_candidate(pid,body=body,media=media)
+        elif action=='restore':
+            with store.tx() as c:
+                changed=c.execute("UPDATE candidates SET state='pending',scheduled_at=NULL,auto_queued=0,publication_error='' WHERE id=? AND state='rejected'",(pid,)).rowcount
+                if not changed:raise ValueError('Вернуть можно только отклонённый пост.')
         elif action in ('draft','reject'):
             with store.tx() as c:
                 changed=c.execute("UPDATE candidates SET state=?,scheduled_at=NULL,auto_queued=0 WHERE id=? AND state IN ('pending','draft','approved')",('draft' if action=='draft' else 'rejected',pid)).rowcount

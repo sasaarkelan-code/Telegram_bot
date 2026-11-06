@@ -1,6 +1,8 @@
-Студия 2.5.0
-300 tests passed.
+Студия 2.6.0
+301 tests passed.
 Python unittest with isolated dependencies; JavaScript syntax and Python compilation checked.
 New: ten-minute scheduling window, hourly gap, late-send deferral, bounded AI plan validation, cinema cap, subscriber history, missing data, view deltas, target changes, authenticated analytics periods, bulk rejection.
 Browser: mobile feed and analytics at 390px, no horizontal overflow (383/383), navigation, weekly period, reject confirmation and cancel.
 No real Telegram sends or Bothost deployment. Pinterest pixel matching not verified.
+
+2.6: reference-driven light/dark UI; self-hosted aurel.css allowlist; archive and restore without schedule; sort controls; source/browser QA on 390px; semantic controls and chart only from measured history.
