@@ -76,6 +76,21 @@ class AccountGateway:
             await self.read(lambda:client.get_dialogs(limit=200))
             return await self.read(lambda:client.get_entity(value))
 
+    def channel_metrics(self,ref):
+        async def metrics():
+            client=await self.connect();entity=await self.entity(client,ref)
+            messages=await self.read(lambda:client.get_messages(entity,limit=200))
+            result=[];albums=set()
+            for msg in messages:
+                group=getattr(msg,'grouped_id',None)
+                if group and group in albums:continue
+                if group:albums.add(group)
+                views=getattr(msg,'views',None)
+                if type(views) is int and msg.date:
+                    result.append(dict(message_id=msg.id,published=int(msg.date.timestamp()),views=views))
+            return result
+        return self.run(metrics())
+
     def status(self):
         async def check():
             client=await self.connect()

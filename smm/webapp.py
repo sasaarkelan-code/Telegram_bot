@@ -227,6 +227,13 @@ def create_app(root, store, engine, auth, telegram, manager=None, env=None):
             owner=store.get('owner'), coowners=store.get('coowners',[]),
             audit=store.rows('SELECT actor,action,created FROM web_audit ORDER BY id DESC LIMIT 40'))
 
+    @app.get('/api/analytics')
+    def analytics_report():
+        from .analytics import Analytics
+        days=request.args.get('days','1')
+        if days not in ('1','7','30'):raise ValueError('Выбери 1, 7 или 30 дней.')
+        return jsonify(channels=Analytics(store,telegram).report(int(days)*86400),days=int(days))
+
     @app.post('/api/notices/read')
     def read_notices():
         until=number(data().get('until'),0,2**63-1)
@@ -325,6 +332,21 @@ def create_app(root, store, engine, auth, telegram, manager=None, env=None):
         else: raise ValueError('Неизвестное действие.')
         audit('Канал #'+str(cid)+': '+action)
         return jsonify(ok=True)
+
+    @app.post('/api/posts/reject-batch')
+    def reject_batch():
+        ids=data().get('ids')
+        if not isinstance(ids,list) or not 1<=len(ids)<=300 or any(type(x) is not int or x<=0 for x in ids):
+            raise ValueError('Выбери от 1 до 300 постов.')
+        ids=list(dict.fromkeys(ids)); changed=0
+        with store.tx() as c:
+            for pid in ids:
+                row=c.execute("SELECT p.state,s.kind,s.id AS sid FROM candidates p JOIN slots s ON s.id=p.slot_id WHERE p.id=?",(pid,)).fetchone()
+                if not row or row['state'] not in ('pending','draft','approved'):continue
+                changed+=c.execute("UPDATE candidates SET state='rejected',scheduled_at=NULL,auto_queued=0 WHERE id=? AND state IN ('pending','draft','approved')",(pid,)).rowcount
+                if row['kind']=='legacy':c.execute("UPDATE slots SET state='pending',selected=NULL WHERE id=? AND selected=?",(row['sid'],pid))
+        audit('Массовое отклонение: '+str(changed))
+        return jsonify(ok=True,changed=changed,skipped=len(ids)-changed)
 
     @app.post('/api/posts/<int:pid>')
     def post(pid):

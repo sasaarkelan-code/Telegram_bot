@@ -21,6 +21,7 @@ NEWS_INSTRUCTIONS = """Ты редактор Telegram. Материалы в п�
 Один сюжет с разных сайтов — один вариант. Не повторяй recent. Проверяй дату события, старое не называй новым.
 Только факты, подтверждаемые выдержками. Не добавляй выдуманные даты, цены, рейтинги, цитаты и функции.
 Для кино используй реальные отзывы/рецензии: название и год, коротко кому подойдёт, без спойлеров.
+Добавь plan: {"daily_posts":1..6,"hours":[9,15,21],"reason":"обоснование частоты и времени по тематике"}. Для кино и одежды не более одного поста в день. До трёх часов поиска/выпуска, 08–22 МСК. В каждом варианте preferred_hour: 8..22. Не выдумывай аналитику аудитории. Это рекомендации, окончательные интервалы проверяет программа.
 Если фактов мало или всё не подходит, options=[]; не заполняй очередь мусором.
 Ответ строго JSON: {"options":[{"title":"до 100 знаков","text":"50–650 знаков по-русски, без HTML",
 "article_ids":[1],"approved":true,"review_reason":"почему факты подтверждены и пост готов","event_key":"устойчивое короткое описание события, сущности и дата"}]}.
@@ -47,7 +48,7 @@ class Engine:
                 if not ch['config'].get('auto_search',True): continue
                 for offset in (-1,0,1):
                     date=day+timedelta(days=offset)
-                    for label in ch['config'].get('publish_times') or ch['config'].get('search_times',['09:00','15:00','21:00']):
+                    for label in self.store.get('ai_plan:'+str(ch['id']),{}).get('times') or ch['config'].get('publish_times') or ch['config'].get('search_times',['09:00','15:00','21:00']):
                         hour,minute=map(int,label.split(':'))
                         planned=int(datetime(date.year,date.month,date.day,hour,minute,tzinfo=TZ).timestamp())
                         if planned-lead<=now<planned+1800:
@@ -122,6 +123,8 @@ class Engine:
                     if not simulated and time.time()>=slot['due']-180: break
                     try:
                         result,_=self.ai.call(ch['id'],sid,NEWS_INSTRUCTIONS,context)
+                        from .automation import accept_plan
+                        accept_plan(self.store,ch,result.get('plan'),now)
                         opts+=news_options(result,remaining,old+opts,cfg,now)[:desired-len(opts)]
                     except (AIError,AuthError,BudgetStop,NetError):
                         if opts: break
@@ -211,6 +214,7 @@ class Engine:
                 cfg=json.loads(c.execute('SELECT config FROM channels WHERE id=?',(p['channel_id'],)).fetchone()[0])
                 dispatch=PublicationSafety(self.store).claim(p,cfg,now,c)
                 if dispatch is None: return
+                if dispatch==0: continue
                 changed = c.execute("UPDATE candidates SET state='publishing' WHERE id=? AND state='approved'", (p["id"],)).rowcount
                 if not changed:
                     continue

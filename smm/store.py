@@ -163,6 +163,16 @@ class Store:
                 if self.get('pause_reason','',c) in ('Процесс остановлен на компьютере.','Процесс остановлен на сервере.') and self.get('model','',c):
                     self.put('paused',False,c);self.put('pause_reason','',c)
                 self.notice('autonomy:24','Автопилот включён для подключённых каналов: ИИ проверяет новые посты и назначает публикации. Старая очередь сохранена. Управление и пауза — на сайте; результаты и ошибки дублируются в Telegram.',c)
+            if not self.get('mobile25',False,c):
+                for row in c.execute('SELECT id,config FROM channels').fetchall():
+                    cfg=json.loads(row['config'])
+                    cfg['post_gap_minutes']=max(60,cfg.get('post_gap_minutes',5))
+                    if cfg.get('mode') in ('cinema','fashion'):
+                        cfg['posts_per_run']=1
+                        cfg['publish_times']=[(cfg.get('times') or ['20:00'])[-1]]
+                    c.execute('UPDATE channels SET config=? WHERE id=?',(json.dumps(cfg,ensure_ascii=False),row['id']))
+                c.execute("UPDATE candidates SET scheduled_at=MAX(COALESCE(scheduled_at,0),?) WHERE auto_queued=1 AND state='approved'",(int(time.time())+600,))
+                self.put('mobile25',True,c)
 
     @contextlib.contextmanager
     def tx(self):
@@ -224,6 +234,7 @@ class Store:
             previous=c.execute('SELECT target,config FROM channels WHERE id=?',(cid,)).fetchone()
             old_cfg=json.loads(previous['config']) if previous else {}
             changed_keys={k for k in set(old_cfg)|set(config or {}) if old_cfg.get(k)!=(config or {}).get(k)} if config is not None else set()
+            if changed_keys.intersection({'topic','mode','publish_times','sources','include','exclude'}):self.put('ai_plan:'+str(cid),{},c)
             if config is not None:
                 c.execute("UPDATE channels SET config=? WHERE id=?", (json.dumps(config, ensure_ascii=False), cid))
             for k, v in fields.items():
@@ -427,6 +438,7 @@ class Store:
             if not p['enabled'] or not p['target']: raise ValueError('Сначала подключи и включи канал.')
             cfg,meta=json.loads(p['config']),json.loads(p['meta'])
             if automatic:
+                if due < now+600: raise ValueError('Для проверки требуется минимум 10 минут.')
                 slot=c.execute('SELECT search_cancelled,state FROM slots WHERE id=?',(p['slot_id'],)).fetchone()
                 if self.get('paused',True,c) or not cfg.get('auto_publish') or self.get('publication_blocked:'+str(p['channel_id']),'',c) or slot['search_cancelled'] or slot['state']=='cancelled' or p['state']!='pending':
                     raise ValueError('Автопубликация остановлена. Пост остаётся на проверке.')

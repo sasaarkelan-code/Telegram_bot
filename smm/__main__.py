@@ -128,6 +128,11 @@ def run(root, store):
         scheduler.start()
         publisher = threading.Thread(target=engine.publisher_loop, daemon=True)
         publisher.start()
+        from .analytics import Analytics
+        analytics=Analytics(store,telegram)
+        manager.analytics=analytics
+        metrics_worker=threading.Thread(target=analytics.loop,args=(engine.shutdown,),daemon=True)
+        metrics_worker.start()
         account_worker=threading.Thread(target=manager.loop,args=(engine.shutdown,),daemon=True)
         account_worker.start()
         from .notifications import EventNotifications

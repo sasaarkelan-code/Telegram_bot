@@ -163,6 +163,7 @@ def news_options(result, articles, previous, config, now):
         media = next((known[i]["image"] for i in ids if known[i]["image"]), "")
         p = dict(title=title, body=text, media=media, event_key=event, article_ids=ids,
                  meta={"sources": refs, "mode": config["mode"], "checked_at": int(now),"editor_approved": raw.get("approved") is True, "editor_reason": plain(str(raw.get("review_reason", "")))[:350]})
+        if type(raw.get('preferred_hour')) is int and 8<=raw['preferred_hour']<=22:p['meta']['preferred_hour']=raw['preferred_hour']
         if utf16(render(p)) > 1000:
             continue
         options.append(p)

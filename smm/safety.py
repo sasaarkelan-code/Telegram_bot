@@ -53,6 +53,11 @@ class PublicationSafety:
         """Called inside the same transaction as the publisher's claim."""
         if self.store.get('emergency_stop',{},c).get('active'): return None
         target=destination(post['target'])
+        if post.get('auto_queued'):
+            previous=c.execute("SELECT MAX(started) FROM publication_dispatches WHERE target=? AND outcome IN ('sending','sent','unknown')",(target,)).fetchone()[0]
+            if previous and previous+3600>now:
+                c.execute('UPDATE candidates SET scheduled_at=? WHERE id=?',(previous+3600,post['id']))
+                return 0
         problem=quality_problem(post)
         body=normalized(post['body']);title=normalized(post['title'])
         fingerprint=hashlib.sha256((title+'\n'+body).encode()).hexdigest()
@@ -73,6 +78,8 @@ class PublicationSafety:
         # Keep the usual 3 x 2 schedule, with a hard ceiling of 12 per day.
         slots=config.get('publish_times') or config.get('search_times') or config.get('times') or ['09:00','15:00','21:00']
         daily=max(2,min(12,len(set(slots))*max(1,min(2,int(config.get('posts_per_run',2))))))
+        plan=self.store.get('ai_plan:'+str(post['channel_id']),{},c)
+        if type(plan.get('daily_posts')) is int and 1<=plan['daily_posts']<=6:daily=max(2,plan['daily_posts'])
         if not problem and len(recent)>=2:
             problem='Попытка отправить третий пост в один канал за 10 минут.'
         if not problem and sum(r['day']==local_day(now) for r in rows)>=daily:

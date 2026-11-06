@@ -140,3 +140,25 @@ label{display:block;font-size:11px;font-weight:550;color:var(--secondary);margin
 .notification-button{position:relative}.notification-button>span[data-icon]{display:flex}.notice-count{position:absolute;right:-4px;top:-3px;min-width:17px;height:17px;padding:1px 4px;background:var(--accent);color:var(--accent-ink);border-radius:8px;font-size:9px;font-weight:700;display:grid;place-items:center;border:2px solid var(--bg)}
 .notification-summary{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin:0 0 18px}.notification-list{display:grid;gap:12px}.notification-card{padding:20px 24px;margin:0}.notification-card.unread{border-color:color-mix(in srgb,var(--accent) 35%,var(--line));box-shadow:inset 3px 0 var(--accent)}.notification-meta{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:10px}.notification-card.unread .notification-meta>span{color:var(--accent)}.notification-card p{font-size:13px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--secondary);margin:14px 0 0}
 @media(max-width:700px){.notification-card{padding:18px}.notification-summary{font-size:11px}.notice-count{right:-2px}.top-actions{gap:5px}}
+
+/* Mobile controls: larger touch targets and readable type. */
+@media(max-width:700px){.mobile-bottom button{min-height:56px}.proposal-filters .tab{min-height:44px;font-size:12px}.proposal-summary{align-items:center;gap:10px;flex-wrap:wrap}.proposal-summary .btn{min-height:44px}.post-side-actions .btn,.post-secondary-actions .btn,.channel-actions .btn{min-height:48px;font-size:14px}.proposal-list.list .proposal-title{font-size:15px}.modal-body input,.modal-body select,.modal-body textarea{font-size:16px}.mobile-bottom{padding-bottom:max(8px,env(safe-area-inset-bottom))}}
+/* Studio mobile: compact editorial cards and thumb-friendly sheets. */
+@media(max-width:700px){
+ body{background:radial-gradient(ellipse at 20% 0%,#222737 0,transparent 42%),var(--bg)}
+ .topbar{padding:12px 16px;min-height:64px}.main-wrap{padding-bottom:100px}
+ .page-head{gap:16px;margin-bottom:22px}.page-head h1{font-size:32px;letter-spacing:-1.2px}.page-head p{font-size:14px;line-height:1.65}
+ .panel,.channel-card{border-radius:24px;padding:22px;background:linear-gradient(145deg,var(--panel-raised),var(--panel));box-shadow:0 12px 30px #00000016}
+ .proposal-filters{position:relative;padding:14px;border-radius:22px;background:var(--panel);gap:12px}
+ .proposal-filters .tabs{display:flex;overflow:auto;flex-wrap:nowrap;gap:6px;scrollbar-width:none}.proposal-filters .tab{flex:0 0 auto;padding:12px 14px;font-size:13px}
+ .proposal-search{display:grid;grid-template-columns:1fr;gap:10px}.view-toggle{display:none}.proposal-search select,.proposal-search input{width:100%;min-height:48px;font-size:16px}
+ .proposal-list.list .proposal-card{display:flex;flex-direction:column;text-align:left;border-radius:24px;overflow:hidden}.list .proposal-thumbnail{width:100%;height:150px}.list .proposal-copy{padding:20px;width:100%}.proposal-title{font-size:18px!important;line-height:1.4}.proposal-excerpt{font-size:14px!important;line-height:1.7}.proposal-bottom{padding-top:16px}
+ .mobile-bottom{left:10px;right:10px;bottom:8px;border:1px solid var(--line);border-radius:24px;background:var(--panel);box-shadow:0 8px 35px #0006;padding:8px 5px max(8px,env(safe-area-inset-bottom))}.mobile-bottom button{border-radius:17px;min-height:54px;font-size:12px}
+ .modal-overlay{align-items:flex-end;padding:0}.modal{border-radius:26px 26px 0 0;max-height:94dvh;width:100%;margin:0}.modal-body{padding:18px 18px max(24px,env(safe-area-inset-bottom));overflow:auto}.modal-header{padding:20px}
+ .post-preview-layout{display:flex;flex-direction:column}.post-side{width:100%;padding:18px 0}.post-side-actions,.post-secondary-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}.post-side-actions .btn:first-child{grid-column:1/-1}.btn{touch-action:manipulation;min-height:44px}
+ .calendar-row{flex-wrap:wrap;gap:12px}.calendar-row-copy{min-width:0;flex:1}.calendar-time{font-size:20px}.stats{grid-template-columns:1fr!important;gap:12px}.stat{border-radius:22px;padding:20px}.stat-value{font-size:30px}
+ .form-actions{flex-wrap:wrap;gap:10px}.form-actions .btn{flex:1;min-height:48px}.channel-actions{display:grid;grid-template-columns:1fr 1fr}.detail-list dd{text-align:right;overflow-wrap:anywhere}
+}
+@media(max-width:700px){.page-head{display:flex!important;flex-direction:column;align-items:stretch}.page-head>div{width:100%}.page-head .flex{display:flex;gap:10px}.page-head .flex .btn{max-width:none;min-height:46px;font-size:14px;white-space:nowrap}.notice{font-size:13px;line-height:1.6;padding:16px;flex-wrap:wrap}.notice .btn{min-height:44px;font-size:13px}.proposal-summary{font-size:13px}.proposal-summary .btn{font-size:13px}.proposal-group-head h2{font-size:17px}.proposal-group-head p{font-size:12px}.help,.box-note{font-size:13px;line-height:1.7}}
+
+@media(max-width:700px){.list .proposal-thumbnail:not(:has(img)){display:none!important}.proposal-card{content-visibility:auto;contain-intrinsic-size:auto 180px}}

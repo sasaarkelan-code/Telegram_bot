@@ -51,12 +51,12 @@ class AutonomyTests(Base):
         self.engine.tick(self.at)
         posts=self.store.rows('SELECT * FROM candidates ORDER BY id')
         self.assertEqual([p['state'] for p in posts],['approved','approved'])
-        self.assertEqual([p['scheduled_at'] for p in posts],[self.release,self.release+300])
+        self.assertEqual([p['scheduled_at'] for p in posts],[self.release,self.release+3600])
         self.assertTrue(all(p['auto_queued'] for p in posts))
         self.assertEqual(self.ai.call.call_count,1)
         self.engine.tick(self.at+10)
-        self.engine.publish(self.release);self.engine.publish(self.release+300)
-        self.engine.tick(self.release+301)
+        self.engine.publish(self.release);self.engine.publish(self.release+3600)
+        self.engine.tick(self.release+3601)
         self.assertEqual(len(self.tg.published),2)
         self.assertEqual(self.ai.call.call_count,1)
 
@@ -87,6 +87,8 @@ class AutonomyTests(Base):
     def test_auto_posts_survive_short_server_outage_but_not_old_backlog(self):
         sid,rows=self.ready()
         self.engine.expire(self.release+600);self.engine.publish(self.release+600)
+        self.assertEqual(len(self.tg.published),1)
+        self.engine.publish(self.release+4200)
         self.assertEqual(len(self.tg.published),2)
         self.assertFalse(self.store.get('paused'))
 
@@ -140,7 +142,7 @@ class AutonomyTests(Base):
         self.assertEqual(self.store.candidate(arows[0]['id'])['state'],'unknown')
         self.assertEqual(self.store.candidate(brows[0]['id'])['state'],'sent')
         self.assertFalse(self.store.get('paused'))
-        self.engine.publish(self.release+300)
+        self.engine.publish(self.release+3600)
         self.assertEqual(calls.count('-100111111111'),1)
         self.assertEqual(self.store.candidate(brows[1]['id'])['state'],'sent')
 
@@ -180,7 +182,7 @@ class AutonomyTests(Base):
 
     def test_old_auto_queue_is_not_backfilled_after_long_outage(self):
         sid,rows=self.ready()
-        self.engine.expire(self.release+2400);self.engine.publish(self.release+2400)
+        self.engine.expire(self.release+6000);self.engine.publish(self.release+6000)
         self.assertTrue(all(self.store.candidate(p['id'])['state']=='draft' for p in rows))
         self.assertEqual(self.tg.published,[])
 

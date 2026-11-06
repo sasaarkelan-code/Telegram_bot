@@ -351,6 +351,8 @@ class Manager:
                     if status.get('cooldown'): self.store.put('manager_cooldown',status['cooldown'])
                     if not status.get('connected'): self.stop(reason=status.get('note','Аккаунт недоступен.'))
                 self.tick()
+                if getattr(self,'analytics',None) and not self.store.get('emergency_stop',{}).get('active') and self.store.get('manager_account',{}).get('connected') and not any(x['state'] in ('active','checking') for x in self.entries()):
+                    self.analytics.collect_views(self.gateway)
             except Exception:
                 self.stop(reason='Ошибка менеджера. Проверь журнал и подключение аккаунта.')
             shutdown.wait(1)

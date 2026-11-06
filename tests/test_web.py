@@ -29,7 +29,7 @@ class WebTests(unittest.TestCase):
         return self.s.add_candidates(sid,[dict(title='Пост',body='Текст проверенного поста'),dict(title='Второй',body='Другой проверенный пост')],time.time())
     def test_public_shell_private_data(self):
         with self.c.get('/') as r:self.assertEqual(r.status_code,200)
-        self.assertEqual(self.c.get('/healthz').json['version'],'2.4.1')
+        self.assertEqual(self.c.get('/healthz').json['version'],'2.5.0')
         self.assertEqual(self.c.get('/api/state').status_code,401)
         with self.c.get('/assets/app.js') as r:self.assertEqual(r.status_code,200)
     def test_code_single_use_and_cookie(self):
@@ -247,3 +247,18 @@ class WebTests(unittest.TestCase):
         self.tg.publish.side_effect=None;self.tg.publish.return_value={'message_id':777}
         self.engine.publish(now+3600)
         self.assertEqual(self.s.candidate(a)['state'],'sent')
+
+    def test_bulk_reject_skips_sent_and_invalid_requests(self):
+        self.login();a,b=self.candidates()
+        self.s.execute("UPDATE candidates SET state='sent' WHERE id=?",(b,))
+        r=self.post('/api/posts/reject-batch',{'ids':[a,b]})
+        self.assertEqual(r.status_code,200,r.json)
+        self.assertEqual((r.json['changed'],r.json['skipped']),(1,1))
+        self.assertEqual(self.s.candidate(a)['state'],'rejected')
+        self.assertEqual(self.s.candidate(b)['state'],'sent')
+        self.assertEqual(self.post('/api/posts/reject-batch',{'ids':[]}).status_code,400)
+
+    def test_analytics_requires_auth_and_valid_period(self):
+        self.assertEqual(self.c.get('/api/analytics').status_code,401)
+        self.login();self.assertEqual(self.c.get('/api/analytics?days=7').status_code,200)
+        self.assertEqual(self.c.get('/api/analytics?days=999').status_code,400)
